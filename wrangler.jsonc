@@ -8,6 +8,10 @@
   "env": {
     "dev": {
       "name": "phonography-backend-dev",
+      // Custom Domain: デプロイ時に DNS レコードと証明書が自動作成される
+      "routes": [
+        { "pattern": "api-dev.phonography.me", "custom_domain": true }
+      ],
       // 署名付きURL生成(S3互換API)用。シークレットの R2_ACCESS_KEY_ID /
       // R2_SECRET_ACCESS_KEY はローカルでは .dev.vars、デプロイ環境では
       // GitHub Environment Secrets から同期する
@@ -31,6 +35,9 @@
     },
     "prod": {
       "name": "phonography-backend",
+      "routes": [
+        { "pattern": "api.phonography.me", "custom_domain": true }
+      ],
       "vars": {
         "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",
         "R2_BUCKET_NAME": "phonography-bucket-prod"
