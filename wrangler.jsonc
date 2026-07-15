@@ -2,37 +2,52 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "phonography-backend",
   "main": "src/index.ts",
-  "compatibility_date": "2026-07-14"
-  // "compatibility_flags": [
-  //   "nodejs_compat"
-  // ],
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "MY_KV_NAMESPACE",
-  //     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  //   }
-  // ],
-  // "r2_buckets": [
-  //   {
-  //     "binding": "MY_BUCKET",
-  //     "bucket_name": "my-bucket"
-  //   }
-  // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
-  //   }
-  // ],
-  // "ai": {
-  //   "binding": "AI"
-  // },
-  // "observability": {
-  //   "enabled": true,
-  //   "head_sampling_rate": 1
-  // }
+  "compatibility_date": "2026-07-14",
+  // named environment ではトップレベルのバインディングは継承されないため、
+  // D1 / R2 は env.dev / env.prod の両方に定義する
+  "env": {
+    "dev": {
+      "name": "phonography-backend-dev",
+      // 署名付きURL生成(S3互換API)用。シークレットの R2_ACCESS_KEY_ID /
+      // R2_SECRET_ACCESS_KEY はローカルでは .dev.vars、デプロイ環境では
+      // GitHub Environment Secrets から同期する
+      "vars": {
+        "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",
+        "R2_BUCKET_NAME": "phonography-bucket-dev"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "phonography-db-dev",
+          "database_id": "ed288207-c83f-4529-ad57-6ac568eacf47"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "phonography-bucket-dev"
+        }
+      ]
+    },
+    "prod": {
+      "name": "phonography-backend",
+      "vars": {
+        "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",
+        "R2_BUCKET_NAME": "phonography-bucket-prod"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "phonography-db-prod",
+          "database_id": "4a357e87-59f6-414c-9879-abf651efbc95"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "phonography-bucket-prod"
+        }
+      ]
+    }
+  }
 }
