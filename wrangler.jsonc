@@ -17,13 +17,15 @@
       // GitHub Environment Secrets から同期する
       "vars": {
         "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",
-        "R2_BUCKET_NAME": "phonography-bucket-dev"
+        "R2_BUCKET_NAME": "phonography-bucket-dev",
+        "CLERK_PUBLISHABLE_KEY": "pk_test_YnVyc3RpbmctbWFybW90LTEwLmNsZXJrLmFjY291bnRzLmRldiQ"
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "phonography-db-dev",
-          "database_id": "ed288207-c83f-4529-ad57-6ac568eacf47"
+          "database_id": "ed288207-c83f-4529-ad57-6ac568eacf47",
+          "migrations_dir": "drizzle"
         }
       ],
       "r2_buckets": [
@@ -35,18 +37,18 @@
     },
     "prod": {
       "name": "phonography-backend",
-      "routes": [
-        { "pattern": "api.phonography.me", "custom_domain": true }
-      ],
+      "routes": [{ "pattern": "api.phonography.me", "custom_domain": true }],
       "vars": {
         "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",
-        "R2_BUCKET_NAME": "phonography-bucket-prod"
+        "R2_BUCKET_NAME": "phonography-bucket-prod",
+        "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsucGhvbm9ncmFwaHkubWUk"
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "phonography-db-prod",
-          "database_id": "4a357e87-59f6-414c-9879-abf651efbc95"
+          "database_id": "4a357e87-59f6-414c-9879-abf651efbc95",
+          "migrations_dir": "drizzle"
         }
       ],
       "r2_buckets": [

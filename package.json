@@ -5,13 +5,22 @@
     "dev": "wrangler dev --env dev",
     "deploy:dev": "wrangler deploy --env dev --minify",
     "deploy:prod": "wrangler deploy --env prod --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --env dev --local",
+    "db:migrate:dev": "wrangler d1 migrations apply DB --env dev --remote",
+    "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote"
   },
   "dependencies": {
+    "@clerk/backend": "^3.11.5",
+    "@hono/zod-validator": "^0.9.0",
     "aws4fetch": "^1.0.20",
-    "hono": "^4.12.30"
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.30",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "drizzle-kit": "^0.31.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.110.0"
   }

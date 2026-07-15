@@ -22,12 +22,18 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env prod --minify
           packageManager: bun
+          # デプロイ前に D1 マイグレーションを適用
+          preCommands: bunx wrangler d1 migrations apply DB --env prod --remote
           # Worker シークレット同期:
           # GitHub Environment (prod) の Secrets を env で渡し、secrets に名前を列挙すると
           # デプロイ時に wrangler secret put 相当が実行される。
           secrets: |
             R2_ACCESS_KEY_ID
             R2_SECRET_ACCESS_KEY
+            CLERK_SECRET_KEY
+            CLERK_WEBHOOK_SIGNING_SECRET
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_WEBHOOK_SIGNING_SECRET: ${{ secrets.CLERK_WEBHOOK_SIGNING_SECRET }}
