@@ -1,0 +1,33 @@
+name: Deploy (prod)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env prod --minify
+          packageManager: bun
+          # Worker シークレット同期:
+          # GitHub Environment (prod) の Secrets を env で渡し、secrets に名前を列挙すると
+          # デプロイ時に wrangler secret put 相当が実行される。
+          secrets: |
+            R2_ACCESS_KEY_ID
+            R2_SECRET_ACCESS_KEY
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

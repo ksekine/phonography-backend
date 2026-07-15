@@ -1,0 +1,10 @@
+# ローカル開発用シークレットの雛形。
+# このファイルを .dev.vars にコピーして実際の値を設定する(.dev.vars は gitignore 済み)。
+# デプロイ環境のシークレットは GitHub Environments (dev/prod) の Secrets で管理し、
+# .github/workflows/deploy-*.yml の secrets ブロックで Worker に同期する。
+
+# R2 署名付きURL生成用 (S3互換API)。
+# Cloudflare ダッシュボード → R2 → Manage R2 API Tokens で
+# 対象バケットに Object Read & Write をスコープしたトークンを発行して取得する。
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
