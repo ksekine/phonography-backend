@@ -23,6 +23,9 @@ export function toPublicRecording(
     durationSeconds: row.durationSeconds,
     format: row.format,
     fileSizeBytes: row.fileSizeBytes,
+    // 再生側のラウドネス正規化用(ターゲット -16 LUFS への静的ゲイン計算に使う)
+    loudnessLufs: row.loudnessLufs,
+    truePeakDb: row.truePeakDb,
     hasImage: row.imageKey !== null,
     likeCount: row.likeCount,
     playCount: row.playCount,
@@ -44,8 +47,24 @@ export function toPublicRecording(
   return base;
 }
 
-/** マップピン用の軽量 DTO */
-export function toMapRecording(row: RecordingRow) {
+/**
+ * マップピン用の軽量 DTO。
+ * ユーザー固有の情報(likedByMe / isMine 等)を含めないこと —
+ * マップのレスポンスは全ユーザー共有でキャッシュされる前提。
+ * (引数は CTE 経由の行でも使えるよう必要カラムの Pick にしている)
+ */
+export function toMapRecording(
+  row: Pick<
+    RecordingRow,
+    | "id"
+    | "title"
+    | "latitude"
+    | "longitude"
+    | "durationSeconds"
+    | "imageKey"
+    | "likeCount"
+  >
+) {
   return {
     id: row.id,
     title: row.title,

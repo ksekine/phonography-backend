@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, gte, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { optionalAuth, requireAuth } from "../middleware/auth";
@@ -8,6 +8,8 @@ import { toMapRecording, toPublicRecording } from "../lib/dto";
 import { encodeGeohash } from "../lib/geohash";
 import { presignPutUrl } from "../lib/r2presign";
 import {
+  MAP_CACHE_TTL_SECONDS,
+  MAP_CELL_PRECISION,
   MAX_AUDIO_BYTES,
   MIME,
   REPORT_HIDE_THRESHOLD,
@@ -59,6 +61,8 @@ app.post(
       address: body.address ?? null,
       geohash: encodeGeohash(body.latitude, body.longitude),
       durationSeconds: body.durationSeconds,
+      loudnessLufs: body.loudnessLufs ?? null,
+      truePeakDb: body.truePeakDb ?? null,
       format: body.format,
       audioKey,
       recordedAt: body.recordedAt ? new Date(body.recordedAt * 1000) : null,
@@ -126,7 +130,9 @@ app.post("/recordings/:id/complete", requireAuth, async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// map (レコメンド: ビューポート内を score 順に返す)
+// map (レコメンド)
+// - bbox なし: 全世界から geohash 格子ごとのラウンドロビンで最大 1000 件(地理分散)
+// - bbox あり: 従来のビューポート検索(ズームイン時の追加取得用)
 // ※ /recordings/:id より先に定義してパスの衝突を避ける
 // ---------------------------------------------------------------------------
 
@@ -137,22 +143,76 @@ app.get(
   async (c) => {
     const q = c.req.valid("query");
     const db = drizzle(c.env.DB);
-    const rows = await db
-      .select()
-      .from(recordings)
-      .where(
-        and(
-          eq(recordings.status, "ready"),
-          eq(recordings.visibility, "public"),
-          gte(recordings.latitude, q.minLat),
-          lte(recordings.latitude, q.maxLat),
-          gte(recordings.longitude, q.minLng),
-          lte(recordings.longitude, q.maxLng)
+
+    if (q.minLat !== undefined) {
+      const rows = await db
+        .select()
+        .from(recordings)
+        .where(
+          and(
+            eq(recordings.status, "ready"),
+            eq(recordings.visibility, "public"),
+            gte(recordings.latitude, q.minLat),
+            lte(recordings.latitude, q.maxLat as number),
+            gte(recordings.longitude, q.minLng as number),
+            lte(recordings.longitude, q.maxLng as number)
+          )
         )
-      )
-      .orderBy(desc(recordings.score))
+        .orderBy(desc(recordings.score))
+        .limit(q.limit);
+      return c.json({ items: rows.map(toMapRecording) });
+    }
+
+    // グローバルモード: 応答は全ユーザー共通(マップ DTO にユーザー固有情報を
+    // 含めない前提)なので、Cache API で共有キャッシュできる
+    const cache = caches.default;
+    const cacheKey = new Request(c.req.url);
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const res = new Response(cached.body, cached);
+      res.headers.set("x-cache", "HIT");
+      return res;
+    }
+
+    // geohash 格子(precision 3 ≈ 156km)ごとに score 順位を付け、
+    // 「各セルの 1 位 → 2 位 → …」の順に採用して地理的分散を担保する。
+    // 録音が特定地域に集中している間はその地域だけで埋まり、
+    // 他地域に録音が増えたら少数でも必ず先に採用される。
+    // スケールで遅くなったら: キャッシュ TTL 延長 → Cron で事前計算、の順で逃がす
+    const cellRank = sql<number>`row_number() over (
+      partition by substr(${recordings.geohash}, 1, ${MAP_CELL_PRECISION})
+      order by ${recordings.score} desc
+    )`.as("cell_rank");
+    const ranked = db.$with("ranked").as(
+      db
+        .select({
+          id: recordings.id,
+          title: recordings.title,
+          latitude: recordings.latitude,
+          longitude: recordings.longitude,
+          durationSeconds: recordings.durationSeconds,
+          imageKey: recordings.imageKey,
+          likeCount: recordings.likeCount,
+          score: recordings.score,
+          cellRank,
+        })
+        .from(recordings)
+        .where(
+          and(eq(recordings.status, "ready"), eq(recordings.visibility, "public"))
+        )
+    );
+    const rows = await db
+      .with(ranked)
+      .select()
+      .from(ranked)
+      .orderBy(asc(ranked.cellRank), desc(ranked.score))
       .limit(q.limit);
-    return c.json({ items: rows.map(toMapRecording) });
+
+    const res = c.json({ items: rows.map(toMapRecording) });
+    res.headers.set("cache-control", `public, max-age=${MAP_CACHE_TTL_SECONDS}`);
+    res.headers.set("x-cache", "MISS");
+    c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
+    return res;
   }
 );
 

@@ -10,12 +10,13 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /**
- * Clerk ユーザーの最小ミラー。
- * プロフィール情報は Clerk 側が持つため複製しない(匿名公開のため表示にも使わない)。
- * 行は認証済みリクエストの初回に lazy upsert する(Webhook 不要)。
+ * Firebase Authentication ユーザーの最小ミラー。
+ * プロフィール情報は Firebase 側が持つため複製しない(匿名公開のため表示にも使わない)。
+ * 行は認証済みリクエストの初回に lazy upsert する。
+ * 匿名認証ユーザーも同じ扱い(正規アカウントへの昇格時も UID は変わらない)。
  */
 export const users = sqliteTable("users", {
-  // Clerk の userId ("user_...") をそのまま使う
+  // Firebase の UID をそのまま使う
   id: text("id").primaryKey(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   // 運営によるアカウント停止。ブロック機能を持たない代わりのモデレーション手段
@@ -56,6 +57,12 @@ export const recordings = sqliteTable(
     geohash: text("geohash").notNull(),
     durationSeconds: real("duration_seconds").notNull(),
     format: text("format", { enum: ["wav", "m4a"] }).notNull(),
+    // ラウドネス正規化用メタデータ(クライアント測定・非破壊方式)。
+    // 再生側が「ターゲット(-16 LUFS) − loudness_lufs」の静的ゲインを計算し、
+    // true_peak_db でクリッピングガード、ブースト方向は非対称にキャップする。
+    // ファイル自体は原音のまま(ダウンロードは無加工)
+    loudnessLufs: real("loudness_lufs"),
+    truePeakDb: real("true_peak_db"),
     // アップロード完了確認時に R2 の HEAD で検証して記録(pending の間は 0)
     fileSizeBytes: integer("file_size_bytes").notNull().default(0),
     // R2 キー: audio/{id}.{ext}

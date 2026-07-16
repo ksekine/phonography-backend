@@ -1,29 +1,42 @@
-import { createClerkClient } from "@clerk/backend";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { users } from "../db/schema";
 import type { AppEnv } from "../types";
 
+// Firebase ID トークンの署名鍵 (Google の公開 JWKS)。
+// createRemoteJWKSet が Cache-Control に従ってモジュールスコープでキャッシュする
+const FIREBASE_JWKS_URL =
+  "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
 /**
- * Clerk のセッション検証。認証処理のみを try/catch で包み、
- * 不正・破損トークンは(例外ではなく)未認証として扱う。
+ * Firebase Authentication の ID トークン検証(匿名認証ユーザーも同じ形式)。
+ * 公開鍵検証のためサーバー側シークレットは不要。
+ * 不正・破損・期限切れトークンは(例外ではなく)未認証として扱う。
  */
-async function verifyClerkUserId(c: Context<AppEnv>): Promise<string | null> {
-  const clerk = createClerkClient({
-    secretKey: c.env.CLERK_SECRET_KEY,
-    publishableKey: c.env.CLERK_PUBLISHABLE_KEY,
-  });
-  try {
-    const state = await clerk.authenticateRequest(c.req.raw);
-    if (state.isAuthenticated) {
-      return state.toAuth().userId;
-    }
-  } catch {
-    // 形式不正なトークン等は decodeJwt が throw する → 未認証として扱う
+async function verifyFirebaseUserId(c: Context<AppEnv>): Promise<string | null> {
+  const authorization = c.req.header("authorization");
+  if (!authorization?.startsWith("Bearer ")) {
+    return null;
   }
-  return null;
+  const token = authorization.slice("Bearer ".length);
+  jwks ??= createRemoteJWKSet(new URL(FIREBASE_JWKS_URL));
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: `https://securetoken.google.com/${c.env.FIREBASE_PROJECT_ID}`,
+      audience: c.env.FIREBASE_PROJECT_ID,
+      algorithms: ["RS256"],
+    });
+    // sub = Firebase UID(exp / iat / iss / aud / 署名は jwtVerify が検証済み)
+    return typeof payload.sub === "string" && payload.sub.length > 0
+      ? payload.sub
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -31,7 +44,7 @@ async function verifyClerkUserId(c: Context<AppEnv>): Promise<string | null> {
  * 検証成功時に users へ lazy upsert し、BAN されたユーザー(users.banned_at)は 403。
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
-  const userId = await verifyClerkUserId(c);
+  const userId = await verifyFirebaseUserId(c);
   if (!userId) {
     return c.json({ error: "unauthorized" }, 401);
   }
@@ -58,6 +71,6 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
  * 匿名時は userId = ""(どの録音の所有者とも一致しない)。DB へのアクセスはしない。
  */
 export const optionalAuth = createMiddleware<AppEnv>(async (c, next) => {
-  c.set("userId", (await verifyClerkUserId(c)) ?? "");
+  c.set("userId", (await verifyFirebaseUserId(c)) ?? "");
   await next();
 });

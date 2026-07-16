@@ -5,7 +5,7 @@ import type { AppBindings } from "../types";
 
 /**
  * 退会ユーザーに紐づくデータ(録音・R2 実体・いいね・通報)の完全削除。
- * Clerk Webhook (user.deleted) から呼ばれる。全体が冪等。
+ * DELETE /api/me から呼ばれる。全体が冪等。
  *
  * FK は意図的に NO ACTION のままにしており(誤削除の波及防止)、
  * cascade に頼らずここで明示的に子 → 親の順に削除する。

@@ -4,6 +4,9 @@ import { likes, recordings } from "../db/schema";
 import { computeScore } from "./score";
 
 export const MAX_AUDIO_BYTES = 1024 * 1024 * 1024; // 1 GiB (48kHz/24bit mono の 1 時間 WAV ≈ 519MB に余裕を持たせた上限)
+// マップのグローバルモードで使う geohash 格子のプレフィックス長(3 ≈ 156km 四方)
+export const MAP_CELL_PRECISION = 3;
+export const MAP_CACHE_TTL_SECONDS = 300;
 export const REPORT_HIDE_THRESHOLD = 3;
 export const UPLOAD_URL_EXPIRES_SECONDS = 3600;
 export const MIME: Record<"wav" | "m4a", string> = {

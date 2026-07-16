@@ -8,7 +8,7 @@ export type AppBindings = CloudflareBindings & {
 export type AppEnv = {
   Bindings: AppBindings;
   Variables: {
-    // requireAuth / optionalAuth が設定する Clerk の userId。
+    // requireAuth / optionalAuth が設定する Firebase の UID。
     // optionalAuth の匿名アクセス時は ""(どのユーザーとも一致しない)
     userId: string;
   };

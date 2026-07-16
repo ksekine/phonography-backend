@@ -9,11 +9,5 @@
 R2_ACCESS_KEY_ID=your-r2-access-key-id
 R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
 
-# Clerk (認証)。ダッシュボード → API Keys の Secret Key。
-# ローカル/dev は Development インスタンスの sk_test_...、
-# prod は Production インスタンスの sk_live_... を GitHub Environment に登録する。
-CLERK_SECRET_KEY=sk_test_your-clerk-secret-key
-
-# Clerk Webhook の署名検証用 (Svix)。
-# ダッシュボード → Webhooks でエンドポイント ({API_URL}/webhooks/clerk) を登録すると発行される。
-CLERK_WEBHOOK_SIGNING_SECRET=whsec_your-signing-secret
+# 認証は Firebase Authentication。ID トークンは Google の公開 JWKS で検証するため
+# サーバー側のシークレットは不要(プロジェクト ID は wrangler.jsonc の vars で管理)。

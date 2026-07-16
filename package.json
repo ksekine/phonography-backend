@@ -12,11 +12,11 @@
     "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote"
   },
   "dependencies": {
-    "@clerk/backend": "^3.11.5",
     "@hono/zod-validator": "^0.9.0",
     "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.30",
+    "jose": "^6.2.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
