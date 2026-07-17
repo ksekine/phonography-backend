@@ -15,7 +15,17 @@ app.route("/api", recordingsRoutes);
 app.route("/api/me", meRoutes);
 
 app.onError((err, c) => {
-  console.error(err);
+  console.error({
+    event: "request_error",
+    requestId: c.req.header("cf-ray") ?? crypto.randomUUID(),
+    method: c.req.method,
+    path: c.req.path,
+    error: {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    },
+  });
   return c.json({ error: "internal_error" }, 500);
 });
 

@@ -8,6 +8,14 @@
   "env": {
     "dev": {
       "name": "phonography-backend-dev",
+      "observability": {
+        "enabled": true,
+        "logs": {
+          "enabled": true,
+          "invocation_logs": true,
+          "head_sampling_rate": 1
+        }
+      },
       // Custom Domain: デプロイ時に DNS レコードと証明書が自動作成される
       "routes": [
         { "pattern": "api-dev.phonography.me", "custom_domain": true }
@@ -37,6 +45,14 @@
     },
     "prod": {
       "name": "phonography-backend",
+      "observability": {
+        "enabled": true,
+        "logs": {
+          "enabled": true,
+          "invocation_logs": true,
+          "head_sampling_rate": 1
+        }
+      },
       "routes": [{ "pattern": "api.phonography.me", "custom_domain": true }],
       "vars": {
         "CF_ACCOUNT_ID": "47fd27a5b41446d50874c1ab598f82fb",

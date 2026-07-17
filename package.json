@@ -4,6 +4,8 @@
   "scripts": {
     "test": "bun test",
     "dev": "wrangler dev --env dev",
+    "logs:dev": "wrangler tail --env dev",
+    "logs:prod": "wrangler tail --env prod",
     "deploy:dev": "wrangler deploy --env dev --minify",
     "deploy:prod": "wrangler deploy --env prod --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
