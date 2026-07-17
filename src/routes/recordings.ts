@@ -93,13 +93,7 @@ app.post(
       ? new Date(body.recordedAt * 1000)
       : null;
 
-    if (existing) {
-      // Hide the old generation before any replacement bytes are accepted.
-      await db
-        .update(recordings)
-        .set({ visibility: "private", updatedAt: now })
-        .where(eq(recordings.id, id));
-    } else {
+    if (!existing) {
       await db.insert(recordings).values({
         id,
         userId,
@@ -121,6 +115,11 @@ app.post(
         updatedAt: now,
       });
     }
+
+    // For a replacement upload, keep the currently committed generation and
+    // its visibility unchanged until complete atomically swaps in the staged
+    // generation. A failed or abandoned upload must not make a live recording
+    // disappear from map/search.
 
     await db.insert(recordingUploadSessions).values({
       id: uploadSessionId,
