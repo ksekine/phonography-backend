@@ -65,6 +65,9 @@ export function toMapRecording(
     | "likeCount"
   >
 ) {
+  if (row.latitude === null || row.longitude === null) {
+    throw new Error("map recording is missing coordinates");
+  }
   return {
     id: row.id,
     title: row.title,

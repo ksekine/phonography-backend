@@ -2,6 +2,7 @@
   "name": "phonography-backend",
   "type": "module",
   "scripts": {
+    "test": "bun test",
     "dev": "wrangler dev --env dev",
     "deploy:dev": "wrangler deploy --env dev --minify",
     "deploy:prod": "wrangler deploy --env prod --minify",

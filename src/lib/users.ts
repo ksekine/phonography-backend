@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { likes, recordings, reports, users } from "../db/schema";
+import { likes, recordingUploadSessions, recordings, reports, users } from "../db/schema";
 import type { AppBindings } from "../types";
 
 /**
@@ -25,6 +25,19 @@ export async function deleteUserData(
     .from(recordings)
     .where(eq(recordings.userId, userId));
 
+  const stagedObjects = await db
+    .select({
+      audioKey: recordingUploadSessions.audioKey,
+      imageKey: recordingUploadSessions.imageKey,
+    })
+    .from(recordingUploadSessions)
+    .where(
+      inArray(
+        recordingUploadSessions.recordingId,
+        db.select({ id: recordings.id }).from(recordings).where(eq(recordings.userId, userId))
+      )
+    );
+
   // 本人が(他人の録音に)付けたいいねの対象を控えておき、削除後に like_count を再集計する
   const likedRecordingIds = (
     await db
@@ -36,6 +49,8 @@ export async function deleteUserData(
   // 1) R2 実体を先に削除する(DB を先に消すと、途中失敗時に孤児オブジェクトの手がかりが消える)
   const keys = ownRecordings.flatMap((r) =>
     r.imageKey ? [r.audioKey, r.imageKey] : [r.audioKey]
+  ).concat(
+    stagedObjects.flatMap((r) => (r.imageKey ? [r.audioKey, r.imageKey] : [r.audioKey]))
   );
   for (let i = 0; i < keys.length; i += 1000) {
     await env.BUCKET.delete(keys.slice(i, i + 1000)); // R2 の一括削除上限は 1000 キー
@@ -52,6 +67,9 @@ export async function deleteUserData(
     db.delete(likes).where(inArray(likes.recordingId, ownRecordingIds)),
     db.delete(reports).where(eq(reports.reporterUserId, userId)),
     db.delete(reports).where(inArray(reports.recordingId, ownRecordingIds)),
+    db
+      .delete(recordingUploadSessions)
+      .where(inArray(recordingUploadSessions.recordingId, ownRecordingIds)),
     db.delete(recordings).where(eq(recordings.userId, userId)),
     db.delete(users).where(eq(users.id, userId)),
   ]);

@@ -1,9 +1,9 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, gte, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { optionalAuth, requireAuth } from "../middleware/auth";
-import { likes, recordings, reports } from "../db/schema";
+import { likes, recordingUploadSessions, recordings, reports } from "../db/schema";
 import { toMapRecording, toPublicRecording } from "../lib/dto";
 import { encodeGeohash } from "../lib/geohash";
 import { presignPutUrl } from "../lib/r2presign";
@@ -19,7 +19,6 @@ import {
   isLikedBy,
   loadRecording,
   refreshScore,
-  sanitizeFilename,
   type RecordingRow,
 } from "../lib/recordings";
 import { computeScore } from "../lib/score";
@@ -36,7 +35,7 @@ import {
 const app = new Hono<AppEnv>();
 
 // ---------------------------------------------------------------------------
-// upload (2 段階): POST /recordings → クライアントが R2 へ PUT → POST /recordings/:id/complete
+// upload (2 段階): POST /recordings → R2 PUT → upload session complete
 // ---------------------------------------------------------------------------
 
 app.post(
@@ -46,28 +45,100 @@ app.post(
   async (c) => {
     const body = c.req.valid("json");
     const db = drizzle(c.env.DB);
-    const id = crypto.randomUUID();
+    const id = body.id;
+    const uploadSessionId = crypto.randomUUID();
     const ext = body.format === "wav" ? "wav" : "m4a";
-    const audioKey = `audio/${id}.${ext}`;
+    const audioKey = `uploads/${id}/${uploadSessionId}/audio.${ext}`;
+    const imageKey = body.hasImage
+      ? `uploads/${id}/${uploadSessionId}/image.jpg`
+      : null;
     const now = new Date();
+    const userId = c.get("userId");
+    const existing = await loadRecording(db, id);
+    if (existing && existing.userId !== userId) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (existing?.status === "deleted") {
+      return c.json({ error: "recording_deleted" }, 409);
+    }
+    if (existing?.status === "hidden") {
+      return c.json({ error: "recording_hidden" }, 409);
+    }
 
-    await db.insert(recordings).values({
-      id,
-      userId: c.get("userId"),
+    const previousSessions = await db
+      .select()
+      .from(recordingUploadSessions)
+      .where(eq(recordingUploadSessions.recordingId, id));
+    if (previousSessions.length > 0) {
+      await db
+        .delete(recordingUploadSessions)
+        .where(eq(recordingUploadSessions.recordingId, id));
+      c.executionCtx.waitUntil(
+        Promise.all(
+          previousSessions.flatMap((session) =>
+            [session.audioKey, session.imageKey]
+              .filter((key): key is string => key !== null)
+              .map((key) => c.env.BUCKET.delete(key))
+          )
+        ).then(() => undefined)
+      );
+    }
+
+    const latitude = body.latitude ?? null;
+    const longitude = body.longitude ?? null;
+    const geohash = latitude !== null && longitude !== null
+      ? encodeGeohash(latitude, longitude)
+      : null;
+    const recordedAt = body.recordedAt
+      ? new Date(body.recordedAt * 1000)
+      : null;
+
+    if (existing) {
+      // Hide the old generation before any replacement bytes are accepted.
+      await db
+        .update(recordings)
+        .set({ visibility: "private", updatedAt: now })
+        .where(eq(recordings.id, id));
+    } else {
+      await db.insert(recordings).values({
+        id,
+        userId,
+        title: body.title ?? null,
+        description: body.description ?? null,
+        latitude,
+        longitude,
+        address: body.address ?? null,
+        geohash,
+        durationSeconds: body.durationSeconds,
+        loudnessLufs: body.loudnessLufs ?? null,
+        truePeakDb: body.truePeakDb ?? null,
+        format: body.format,
+        audioKey,
+        recordedAt,
+        status: "pending",
+        visibility: "private",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await db.insert(recordingUploadSessions).values({
+      id: uploadSessionId,
+      recordingId: id,
+      audioKey,
+      imageKey,
       title: body.title ?? null,
       description: body.description ?? null,
-      latitude: body.latitude,
-      longitude: body.longitude,
+      latitude,
+      longitude,
       address: body.address ?? null,
-      geohash: encodeGeohash(body.latitude, body.longitude),
+      geohash,
       durationSeconds: body.durationSeconds,
+      format: body.format,
       loudnessLufs: body.loudnessLufs ?? null,
       truePeakDb: body.truePeakDb ?? null,
-      format: body.format,
-      audioKey,
-      recordedAt: body.recordedAt ? new Date(body.recordedAt * 1000) : null,
+      recordedAt,
       createdAt: now,
-      updatedAt: now,
     });
 
     const uploadUrl = await presignPutUrl(
@@ -75,59 +146,140 @@ app.post(
       audioKey,
       UPLOAD_URL_EXPIRES_SECONDS
     );
-    const imageUploadUrl = body.hasImage
-      ? await presignPutUrl(
-          c.env,
-          `images/${id}.jpg`,
-          UPLOAD_URL_EXPIRES_SECONDS
-        )
+    const imageUploadUrl = imageKey
+      ? await presignPutUrl(c.env, imageKey, UPLOAD_URL_EXPIRES_SECONDS)
       : undefined;
 
     return c.json(
-      { id, uploadUrl, imageUploadUrl, expiresIn: UPLOAD_URL_EXPIRES_SECONDS },
+      {
+        id,
+        uploadSessionId,
+        uploadUrl,
+        imageUploadUrl,
+        expiresIn: UPLOAD_URL_EXPIRES_SECONDS,
+      },
       201
     );
   }
 );
 
-app.post("/recordings/:id/complete", requireAuth, async (c) => {
-  const db = drizzle(c.env.DB);
-  const row = await loadRecording(db, c.req.param("id"));
-  if (!row || row.userId !== c.get("userId") || row.status === "deleted") {
-    return c.json({ error: "not_found" }, 404);
-  }
-  if (row.status !== "pending") {
-    // 冪等: 既に完了済みなら現状を返す
-    return c.json(toPublicRecording(row, { isMine: true }));
-  }
+app.post(
+  "/recordings/:id/upload-sessions/:sessionId/complete",
+  requireAuth,
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const id = c.req.param("id");
+    const row = await loadRecording(db, id);
+    if (!row || row.userId !== c.get("userId") || row.status === "deleted") {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const sessions = await db
+      .select()
+      .from(recordingUploadSessions)
+      .where(
+        and(
+          eq(recordingUploadSessions.id, c.req.param("sessionId")),
+          eq(recordingUploadSessions.recordingId, id)
+        )
+      )
+      .limit(1);
+    const session = sessions[0];
+    if (!session) {
+      // A repeated completion after a successful commit is idempotent.
+      if (row.status === "ready" && row.visibility === "public") {
+        return c.json(toPublicRecording(row, { isMine: true }));
+      }
+      return c.json({ error: "upload_session_not_found" }, 404);
+    }
 
-  const head = await c.env.BUCKET.head(row.audioKey);
-  if (!head) {
-    return c.json({ error: "audio_not_uploaded" }, 400);
+    const audioHead = await c.env.BUCKET.head(session.audioKey);
+    if (!audioHead) {
+      return c.json({ error: "audio_not_uploaded" }, 400);
+    }
+    if (audioHead.size > MAX_AUDIO_BYTES) {
+      await c.env.BUCKET.delete(session.audioKey);
+      return c.json({ error: "file_too_large", maxBytes: MAX_AUDIO_BYTES }, 413);
+    }
+    if (session.imageKey && !(await c.env.BUCKET.head(session.imageKey))) {
+      return c.json({ error: "image_not_uploaded" }, 400);
+    }
+
+    const oldKeys = [row.audioKey, row.imageKey].filter(
+      (key): key is string => key !== null && key !== session.audioKey && key !== session.imageKey
+    );
+    const now = new Date();
+    await db.batch([
+      db
+        .update(recordings)
+        .set({
+          title: session.title,
+          description: session.description,
+          latitude: session.latitude,
+          longitude: session.longitude,
+          address: session.address,
+          geohash: session.geohash,
+          durationSeconds: session.durationSeconds,
+          format: session.format,
+          loudnessLufs: session.loudnessLufs,
+          truePeakDb: session.truePeakDb,
+          recordedAt: session.recordedAt,
+          audioKey: session.audioKey,
+          imageKey: session.imageKey,
+          fileSizeBytes: audioHead.size,
+          status: "ready",
+          visibility: "public",
+          score: computeScore(row.likeCount, row.playCount, row.downloadCount, row.createdAt),
+          updatedAt: now,
+        })
+        .where(eq(recordings.id, id)),
+      db
+        .delete(recordingUploadSessions)
+        .where(eq(recordingUploadSessions.id, session.id)),
+    ]);
+    if (oldKeys.length > 0) {
+      c.executionCtx.waitUntil(
+        Promise.all(oldKeys.map((key) => c.env.BUCKET.delete(key))).then(() => undefined)
+      );
+    }
+    const updated = await loadRecording(db, id);
+    return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
   }
-  if (head.size > MAX_AUDIO_BYTES) {
-    await c.env.BUCKET.delete(row.audioKey);
-    return c.json({ error: "file_too_large", maxBytes: MAX_AUDIO_BYTES }, 413);
+);
+
+app.delete(
+  "/recordings/:id/upload-sessions/:sessionId",
+  requireAuth,
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const row = await loadRecording(db, c.req.param("id"));
+    if (!row || row.userId !== c.get("userId")) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const sessions = await db
+      .select()
+      .from(recordingUploadSessions)
+      .where(
+        and(
+          eq(recordingUploadSessions.id, c.req.param("sessionId")),
+          eq(recordingUploadSessions.recordingId, row.id)
+        )
+      )
+      .limit(1);
+    const session = sessions[0];
+    if (!session) return c.body(null, 204);
+    await db
+      .delete(recordingUploadSessions)
+      .where(eq(recordingUploadSessions.id, session.id));
+    c.executionCtx.waitUntil(
+      Promise.all(
+        [session.audioKey, session.imageKey]
+          .filter((key): key is string => key !== null)
+          .map((key) => c.env.BUCKET.delete(key))
+      ).then(() => undefined)
+    );
+    return c.body(null, 204);
   }
-
-  const imageKey = `images/${row.id}.jpg`;
-  const imageHead = await c.env.BUCKET.head(imageKey);
-
-  const now = new Date();
-  await db
-    .update(recordings)
-    .set({
-      status: "ready",
-      fileSizeBytes: head.size,
-      imageKey: imageHead ? imageKey : null,
-      score: computeScore(0, 0, 0, row.createdAt),
-      updatedAt: now,
-    })
-    .where(eq(recordings.id, row.id));
-
-  const updated = await loadRecording(db, row.id);
-  return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
-});
+);
 
 // ---------------------------------------------------------------------------
 // map (レコメンド)
@@ -142,6 +294,7 @@ app.get(
   zValidator("query", mapQuerySchema),
   async (c) => {
     const q = c.req.valid("query");
+    const userId = c.get("userId");
     const db = drizzle(c.env.DB);
 
     if (q.minLat !== undefined) {
@@ -152,10 +305,14 @@ app.get(
           and(
             eq(recordings.status, "ready"),
             eq(recordings.visibility, "public"),
+            isNotNull(recordings.latitude),
+            isNotNull(recordings.longitude),
+            isNotNull(recordings.geohash),
             gte(recordings.latitude, q.minLat),
             lte(recordings.latitude, q.maxLat as number),
             gte(recordings.longitude, q.minLng as number),
-            lte(recordings.longitude, q.maxLng as number)
+            lte(recordings.longitude, q.maxLng as number),
+            userId ? ne(recordings.userId, userId) : undefined
           )
         )
         .orderBy(desc(recordings.score))
@@ -163,15 +320,17 @@ app.get(
       return c.json({ items: rows.map(toMapRecording) });
     }
 
-    // グローバルモード: 応答は全ユーザー共通(マップ DTO にユーザー固有情報を
-    // 含めない前提)なので、Cache API で共有キャッシュできる
+    // グローバルモード: 匿名時だけ応答が全ユーザー共通なので Cache API を使う。
+    // 認証済みの場合は本人の録音を除外するため共有キャッシュを迂回する。
     const cache = caches.default;
     const cacheKey = new Request(c.req.url);
-    const cached = await cache.match(cacheKey);
-    if (cached) {
-      const res = new Response(cached.body, cached);
-      res.headers.set("x-cache", "HIT");
-      return res;
+    if (!userId) {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const res = new Response(cached.body, cached);
+        res.headers.set("x-cache", "HIT");
+        return res;
+      }
     }
 
     // geohash 格子(precision 3 ≈ 156km)ごとに score 順位を付け、
@@ -198,7 +357,14 @@ app.get(
         })
         .from(recordings)
         .where(
-          and(eq(recordings.status, "ready"), eq(recordings.visibility, "public"))
+          and(
+            eq(recordings.status, "ready"),
+            eq(recordings.visibility, "public"),
+            isNotNull(recordings.latitude),
+            isNotNull(recordings.longitude),
+            isNotNull(recordings.geohash),
+            userId ? ne(recordings.userId, userId) : undefined
+          )
         )
     );
     const rows = await db
@@ -209,9 +375,13 @@ app.get(
       .limit(q.limit);
 
     const res = c.json({ items: rows.map(toMapRecording) });
-    res.headers.set("cache-control", `public, max-age=${MAP_CACHE_TTL_SECONDS}`);
-    res.headers.set("x-cache", "MISS");
-    c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
+    if (userId) {
+      res.headers.set("cache-control", "private, no-store");
+    } else {
+      res.headers.set("cache-control", `public, max-age=${MAP_CACHE_TTL_SECONDS}`);
+      res.headers.set("x-cache", "MISS");
+      c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
+    }
     return res;
   }
 );
@@ -227,6 +397,7 @@ app.get(
   zValidator("query", searchQuerySchema),
   async (c) => {
     const q = c.req.valid("query");
+    const userId = c.get("userId");
     const db = drizzle(c.env.DB);
     // LIKE のワイルドカード(% _ \)をエスケープした部分一致パターン
     const pattern = `%${q.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -241,7 +412,8 @@ app.get(
             sql`${recordings.title} LIKE ${pattern} ESCAPE '\\'`,
             sql`${recordings.description} LIKE ${pattern} ESCAPE '\\'`,
             sql`${recordings.address} LIKE ${pattern} ESCAPE '\\'`
-          )
+          ),
+          userId ? ne(recordings.userId, userId) : undefined
         )
       )
       .orderBy(desc(recordings.score))
@@ -330,7 +502,9 @@ app.patch(
     if (body.latitude !== undefined && body.longitude !== undefined) {
       set.latitude = body.latitude;
       set.longitude = body.longitude;
-      set.geohash = encodeGeohash(body.latitude, body.longitude);
+      set.geohash = body.latitude !== null && body.longitude !== null
+        ? encodeGeohash(body.latitude, body.longitude)
+        : null;
     }
     await db.update(recordings).set(set).where(eq(recordings.id, row.id));
 
@@ -342,25 +516,39 @@ app.patch(
 app.delete("/recordings/:id", requireAuth, async (c) => {
   const db = drizzle(c.env.DB);
   const row = await loadRecording(db, c.req.param("id"));
-  if (!row || row.userId !== c.get("userId") || row.status === "deleted") {
+  if (!row || row.userId !== c.get("userId")) {
     return c.json({ error: "not_found" }, 404);
   }
+  if (row.status === "deleted") return c.body(null, 204);
+  const sessions = await db
+    .select()
+    .from(recordingUploadSessions)
+    .where(eq(recordingUploadSessions.recordingId, row.id));
   // ソフトデリート。R2 実体の削除はレスポンスを待たせず行う
   await db
     .update(recordings)
     .set({ status: "deleted", updatedAt: new Date() })
     .where(eq(recordings.id, row.id));
+  if (sessions.length > 0) {
+    await db
+      .delete(recordingUploadSessions)
+      .where(eq(recordingUploadSessions.recordingId, row.id));
+  }
   c.executionCtx.waitUntil(
     Promise.all([
       c.env.BUCKET.delete(row.audioKey),
       row.imageKey ? c.env.BUCKET.delete(row.imageKey) : Promise.resolve(),
+      ...sessions.flatMap((session) => [
+        c.env.BUCKET.delete(session.audioKey),
+        session.imageKey ? c.env.BUCKET.delete(session.imageKey) : Promise.resolve(),
+      ]),
     ])
   );
   return c.body(null, 204);
 });
 
 // ---------------------------------------------------------------------------
-// media: image / streaming / download
+// media: image / streaming
 // ---------------------------------------------------------------------------
 
 app.get("/recordings/:id/image", optionalAuth, async (c) => {
@@ -441,37 +629,6 @@ app.get("/recordings/:id/stream", optionalAuth, async (c) => {
   }
 
   return new Response(object.body, { status, headers });
-});
-
-app.get("/recordings/:id/download", optionalAuth, async (c) => {
-  const db = drizzle(c.env.DB);
-  const row = await loadRecording(db, c.req.param("id"));
-  if (!row || !canView(row, c.get("userId")) || row.status === "pending") {
-    return c.json({ error: "not_found" }, 404);
-  }
-
-  const object = await c.env.BUCKET.get(row.audioKey);
-  if (!object) {
-    return c.json({ error: "not_found" }, 404);
-  }
-
-  const ext = row.format === "wav" ? "wav" : "m4a";
-  const base = sanitizeFilename(row.title ?? "") || row.id;
-  const filename = `${base}.${ext}`;
-
-  c.executionCtx.waitUntil(bumpCounter(db, row.id, "downloadCount"));
-
-  return new Response(object.body, {
-    headers: {
-      "content-type": MIME[row.format],
-      "content-length": String(object.size),
-      etag: object.httpEtag,
-      // 日本語等の非 ASCII タイトルは RFC 5987 の filename* で渡す
-      "content-disposition": `attachment; filename="${
-        row.id
-      }.${ext}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-    },
-  });
 });
 
 // ---------------------------------------------------------------------------

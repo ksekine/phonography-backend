@@ -91,9 +91,3 @@ export async function isLikedBy(
     .limit(1);
   return rows.length > 0;
 }
-
-export function sanitizeFilename(name: string): string {
-  // パス区切り・引用符などファイル名で問題になる文字を除去
-  const cleaned = name.replace(/[\\/:*?"<>|]/g, "").trim();
-  return cleaned.slice(0, 100);
-}

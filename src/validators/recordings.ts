@@ -4,10 +4,11 @@ const latitudeSchema = z.number().min(-90).max(90);
 const longitudeSchema = z.number().min(-180).max(180);
 
 export const createRecordingSchema = z.object({
+  id: z.string().uuid(),
   title: z.string().max(255).nullish(),
   description: z.string().max(2200).nullish(),
-  latitude: latitudeSchema,
-  longitude: longitudeSchema,
+  latitude: latitudeSchema.nullish(),
+  longitude: longitudeSchema.nullish(),
   address: z.string().max(500).nullish(),
   durationSeconds: z.number().positive().max(3600), // アプリ側の上限 1 時間
   format: z.enum(["wav", "m4a"]),
@@ -15,7 +16,10 @@ export const createRecordingSchema = z.object({
   truePeakDb: z.number().min(-70).max(6).nullish(), // true peak (dBTP)
   recordedAt: z.number().int().positive().nullish(), // unix 秒
   hasImage: z.boolean().default(false),
-});
+}).refine(
+  (v) => (v.latitude == null) === (v.longitude == null),
+  { message: "latitude and longitude must be provided together" }
+);
 
 export const updateRecordingSchema = z
   .object({
@@ -23,8 +27,8 @@ export const updateRecordingSchema = z
     description: z.string().max(2200).nullish(),
     address: z.string().max(500).nullish(),
     visibility: z.enum(["public", "private"]).optional(),
-    latitude: latitudeSchema.optional(),
-    longitude: longitudeSchema.optional(),
+    latitude: latitudeSchema.nullable().optional(),
+    longitude: longitudeSchema.nullable().optional(),
     recordedAt: z.number().int().positive().nullish(),
   })
   .refine((v) => (v.latitude === undefined) === (v.longitude === undefined), {

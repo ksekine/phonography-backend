@@ -48,13 +48,13 @@ export const recordings = sqliteTable(
       .references(() => users.id),
     title: text("title"),
     description: text("description"),
-    // マップ掲載が前提のためアップロード時に必須
-    latitude: real("latitude").notNull(),
-    longitude: real("longitude").notNull(),
+    // 位置情報なしでも公開できる。その場合は検索対象だがマップ対象外。
+    latitude: real("latitude"),
+    longitude: real("longitude"),
     // クライアントが逆ジオコーディング済みの表示用文字列
     address: text("address"),
     // 緯度経度から精度7で導出。ビューポート検索・クラスタリング補助用
-    geohash: text("geohash").notNull(),
+    geohash: text("geohash"),
     durationSeconds: real("duration_seconds").notNull(),
     format: text("format", { enum: ["wav", "m4a"] }).notNull(),
     // ラウドネス正規化用メタデータ(クライアント測定・非破壊方式)。
@@ -101,6 +101,35 @@ export const recordings = sqliteTable(
     // 自分の録音一覧(private も含めて返す)
     index("recordings_user_created_idx").on(t.userId, t.createdAt),
   ]
+);
+
+/**
+ * A staged replacement for a recording. Objects use generation-specific keys
+ * so a failed upload never overwrites the currently active media.
+ */
+export const recordingUploadSessions = sqliteTable(
+  "recording_upload_sessions",
+  {
+    id: text("id").primaryKey(),
+    recordingId: text("recording_id")
+      .notNull()
+      .references(() => recordings.id),
+    audioKey: text("audio_key").notNull().unique(),
+    imageKey: text("image_key"),
+    title: text("title"),
+    description: text("description"),
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    address: text("address"),
+    geohash: text("geohash"),
+    durationSeconds: real("duration_seconds").notNull(),
+    format: text("format", { enum: ["wav", "m4a"] }).notNull(),
+    loudnessLufs: real("loudness_lufs"),
+    truePeakDb: real("true_peak_db"),
+    recordedAt: integer("recorded_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("recording_upload_sessions_recording_idx").on(t.recordingId)]
 );
 
 /**
