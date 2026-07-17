@@ -21,6 +21,8 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env prod --minify
+          # secrets の同期先も Wrangler の prod 環境に合わせる
+          environment: prod
           packageManager: bun
           # デプロイ前に D1 マイグレーションを適用
           preCommands: bunx wrangler d1 migrations apply DB --env prod --remote
