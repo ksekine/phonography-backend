@@ -1,12 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { likes, recordings } from "../db/schema";
+import { likes, recordings, reports } from "../db/schema";
 import { computeScore } from "./score";
 
 export const MAX_AUDIO_BYTES = 1024 * 1024 * 1024; // 1 GiB (48kHz/24bit mono の 1 時間 WAV ≈ 519MB に余裕を持たせた上限)
 // マップのグローバルモードで使う geohash 格子のプレフィックス長(3 ≈ 156km 四方)
 export const MAP_CELL_PRECISION = 3;
 export const MAP_CACHE_TTL_SECONDS = 300;
+export const DETAIL_CACHE_TTL_SECONDS = 60;
 export const REPORT_HIDE_THRESHOLD = 3;
 export const UPLOAD_URL_EXPIRES_SECONDS = 3600;
 export const MIME: Record<"wav" | "m4a", string> = {
@@ -88,6 +89,24 @@ export async function isLikedBy(
     .select({ recordingId: likes.recordingId })
     .from(likes)
     .where(and(eq(likes.userId, userId), eq(likes.recordingId, recordingId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+export async function isReportedBy(
+  db: DB,
+  userId: string,
+  recordingId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ recordingId: reports.recordingId })
+    .from(reports)
+    .where(
+      and(
+        eq(reports.reporterUserId, userId),
+        eq(reports.recordingId, recordingId)
+      )
+    )
     .limit(1);
   return rows.length > 0;
 }

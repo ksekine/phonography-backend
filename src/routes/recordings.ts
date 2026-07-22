@@ -1,13 +1,14 @@
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, desc, eq, gte, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { optionalAuth, requireAuth } from "../middleware/auth";
 import { likes, recordingUploadSessions, recordings, reports } from "../db/schema";
 import { toMapRecording, toPublicRecording } from "../lib/dto";
 import { encodeGeohash } from "../lib/geohash";
 import { presignPutUrl } from "../lib/r2presign";
 import {
+  DETAIL_CACHE_TTL_SECONDS,
   MAP_CACHE_TTL_SECONDS,
   MAP_CELL_PRECISION,
   MAX_AUDIO_BYTES,
@@ -17,6 +18,7 @@ import {
   bumpCounter,
   canView,
   isLikedBy,
+  isReportedBy,
   loadRecording,
   refreshScore,
   type RecordingRow,
@@ -33,6 +35,23 @@ import {
 } from "../validators/recordings";
 
 const app = new Hono<AppEnv>();
+
+function publicDetailCacheKey(c: Context<AppEnv>, recordingId: string): Request {
+  const url = new URL(c.req.url);
+  const recordingsPathIndex = url.pathname.indexOf("/recordings/");
+  url.pathname = `${url.pathname.slice(0, recordingsPathIndex)}/recordings/${recordingId}`;
+  url.search = "";
+  return new Request(url);
+}
+
+function invalidatePublicDetailCache(
+  c: Context<AppEnv>,
+  recordingId: string
+): void {
+  c.executionCtx.waitUntil(
+    caches.default.delete(publicDetailCacheKey(c, recordingId))
+  );
+}
 
 // ---------------------------------------------------------------------------
 // upload (2 段階): POST /recordings → R2 PUT → upload session complete
@@ -241,6 +260,7 @@ app.post(
       );
     }
     const updated = await loadRecording(db, id);
+    invalidatePublicDetailCache(c, row.id);
     return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
   }
 );
@@ -461,17 +481,45 @@ app.get(
 // detail / update / delete
 // ---------------------------------------------------------------------------
 
-app.get("/recordings/:id", optionalAuth, async (c) => {
+app.get("/recordings/:id/me", requireAuth, async (c) => {
   const db = drizzle(c.env.DB);
   const userId = c.get("userId");
   const row = await loadRecording(db, c.req.param("id"));
   if (!row || !canView(row, userId)) {
     return c.json({ error: "not_found" }, 404);
   }
-  const likedByMe = userId ? await isLikedBy(db, userId, row.id) : undefined;
-  return c.json(
-    toPublicRecording(row, { isMine: row.userId === userId, likedByMe })
+  const [likedByMe, reportedByMe] = await Promise.all([
+    isLikedBy(db, userId, row.id),
+    isReportedBy(db, userId, row.id),
+  ]);
+  const res = c.json({ likedByMe, reportedByMe });
+  res.headers.set("cache-control", "private, no-store");
+  return res;
+});
+
+app.get("/recordings/:id", async (c) => {
+  const cache = caches.default;
+  const cacheKey = new Request(c.req.url);
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const res = new Response(cached.body, cached);
+    res.headers.set("x-cache", "HIT");
+    return res;
+  }
+
+  const db = drizzle(c.env.DB);
+  const row = await loadRecording(db, c.req.param("id"));
+  if (!row || !canView(row, "")) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const res = c.json(toPublicRecording(row));
+  res.headers.set(
+    "cache-control",
+    `public, max-age=${DETAIL_CACHE_TTL_SECONDS}`
   );
+  res.headers.set("x-cache", "MISS");
+  c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
+  return res;
 });
 
 app.patch(
@@ -508,6 +556,7 @@ app.patch(
     await db.update(recordings).set(set).where(eq(recordings.id, row.id));
 
     const updated = await loadRecording(db, row.id);
+    invalidatePublicDetailCache(c, row.id);
     return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
   }
 );
@@ -533,6 +582,7 @@ app.delete("/recordings/:id", requireAuth, async (c) => {
       .delete(recordingUploadSessions)
       .where(eq(recordingUploadSessions.recordingId, row.id));
   }
+  invalidatePublicDetailCache(c, row.id);
   c.executionCtx.waitUntil(
     Promise.all([
       c.env.BUCKET.delete(row.audioKey),
@@ -732,6 +782,7 @@ app.post(
           updatedAt: new Date(),
         })
         .where(eq(recordings.id, row.id));
+      invalidatePublicDetailCache(c, row.id);
     }
 
     return c.json({ reported: true }, inserted.length > 0 ? 201 : 200);

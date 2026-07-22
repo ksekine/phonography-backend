@@ -10,7 +10,7 @@ type RecordingRow = typeof recordings.$inferSelect;
  */
 export function toPublicRecording(
   row: RecordingRow,
-  opts: { isMine?: boolean; likedByMe?: boolean } = {}
+  opts: { isMine?: boolean } = {}
 ) {
   const base = {
     id: row.id,
@@ -34,7 +34,6 @@ export function toPublicRecording(
       ? Math.floor(row.recordedAt.getTime() / 1000)
       : null,
     createdAt: Math.floor(row.createdAt.getTime() / 1000),
-    ...(opts.likedByMe !== undefined ? { likedByMe: opts.likedByMe } : {}),
   };
   if (opts.isMine) {
     return {

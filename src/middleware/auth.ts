@@ -67,7 +67,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
 
 /**
  * 未ログインでも通すエンドポイント用(公開録音の閲覧系)。
- * ログイン済みなら userId を設定し、本人判定(private の閲覧・likedByMe)を有効にする。
+ * ログイン済みなら userId を設定し、本人判定(private の閲覧など)を有効にする。
  * 匿名時は userId = ""(どの録音の所有者とも一致しない)。DB へのアクセスはしない。
  */
 export const optionalAuth = createMiddleware<AppEnv>(async (c, next) => {
