@@ -33,6 +33,7 @@ export function toPublicRecording(
     recordedAt: row.recordedAt
       ? Math.floor(row.recordedAt.getTime() / 1000)
       : null,
+    recordedTimeZoneIdentifier: row.recordedTimeZoneIdentifier,
     createdAt: Math.floor(row.createdAt.getTime() / 1000),
   };
   if (opts.isMine) {

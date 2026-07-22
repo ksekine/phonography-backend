@@ -2,6 +2,17 @@ import { z } from "zod";
 
 const latitudeSchema = z.number().min(-90).max(90);
 const longitudeSchema = z.number().min(-180).max(180);
+const timeZoneIdentifierSchema = z
+  .string()
+  .max(255)
+  .refine((identifier) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: identifier }).format();
+      return true;
+    } catch {
+      return false;
+    }
+  }, { message: "invalid IANA time zone identifier" });
 
 export const createRecordingSchema = z.object({
   id: z.string().uuid(),
@@ -15,6 +26,7 @@ export const createRecordingSchema = z.object({
   loudnessLufs: z.number().min(-70).max(0).nullish(), // integrated loudness (LUFS)
   truePeakDb: z.number().min(-70).max(6).nullish(), // true peak (dBTP)
   recordedAt: z.number().int().positive().nullish(), // unix 秒
+  recordedTimeZoneIdentifier: timeZoneIdentifierSchema.nullish(),
   hasImage: z.boolean().default(false),
 }).refine(
   (v) => (v.latitude == null) === (v.longitude == null),
@@ -30,6 +42,7 @@ export const updateRecordingSchema = z
     latitude: latitudeSchema.nullable().optional(),
     longitude: longitudeSchema.nullable().optional(),
     recordedAt: z.number().int().positive().nullish(),
+    recordedTimeZoneIdentifier: timeZoneIdentifierSchema.nullable().optional(),
   })
   .refine((v) => (v.latitude === undefined) === (v.longitude === undefined), {
     message: "latitude and longitude must be provided together",

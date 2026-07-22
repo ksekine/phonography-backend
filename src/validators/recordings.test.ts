@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createRecordingSchema } from "./recordings";
+import { createRecordingSchema, updateRecordingSchema } from "./recordings";
 
 const base = {
   id: "4b55ae5d-4f7f-4fc1-a09d-4ca7e3f2f6bd",
@@ -27,5 +27,35 @@ describe("createRecordingSchema", () => {
     expect(
       createRecordingSchema.safeParse({ ...base, latitude: 35.6812 }).success
     ).toBe(false);
+  });
+
+  test("accepts an IANA recording time zone", () => {
+    expect(
+      createRecordingSchema.safeParse({
+        ...base,
+        recordedTimeZoneIdentifier: "America/New_York",
+      }).success
+    ).toBe(true);
+  });
+
+  test("rejects an invalid recording time zone", () => {
+    expect(
+      createRecordingSchema.safeParse({
+        ...base,
+        recordedTimeZoneIdentifier: "Not/A_Zone",
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("updateRecordingSchema", () => {
+  test("distinguishes an omitted time zone from an explicit null", () => {
+    const omitted = updateRecordingSchema.parse({});
+    const cleared = updateRecordingSchema.parse({
+      recordedTimeZoneIdentifier: null,
+    });
+
+    expect("recordedTimeZoneIdentifier" in omitted).toBe(false);
+    expect(cleared.recordedTimeZoneIdentifier).toBeNull();
   });
 });

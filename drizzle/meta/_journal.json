@@ -22,6 +22,13 @@
       "when": 1784201807555,
       "tag": "0002_acoustic_lord_tyger",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784705373451,
+      "tag": "0003_cynical_lightspeed",
+      "breakpoints": true
     }
   ]
 }

@@ -86,6 +86,7 @@ export const recordings = sqliteTable(
     // 時間減衰の反映は Workers Cron で全件再計算する(triggers は後日追加)
     score: real("score").notNull().default(0),
     recordedAt: integer("recorded_at", { mode: "timestamp" }),
+    recordedTimeZoneIdentifier: text("recorded_timezone_identifier"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
@@ -127,6 +128,7 @@ export const recordingUploadSessions = sqliteTable(
     loudnessLufs: real("loudness_lufs"),
     truePeakDb: real("true_peak_db"),
     recordedAt: integer("recorded_at", { mode: "timestamp" }),
+    recordedTimeZoneIdentifier: text("recorded_timezone_identifier"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (t) => [index("recording_upload_sessions_recording_idx").on(t.recordingId)]

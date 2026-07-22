@@ -111,6 +111,9 @@ app.post(
     const recordedAt = body.recordedAt
       ? new Date(body.recordedAt * 1000)
       : null;
+    const recordedTimeZoneIdentifier = body.recordedTimeZoneIdentifier === undefined
+      ? existing?.recordedTimeZoneIdentifier ?? null
+      : body.recordedTimeZoneIdentifier;
 
     if (!existing) {
       await db.insert(recordings).values({
@@ -128,6 +131,7 @@ app.post(
         format: body.format,
         audioKey,
         recordedAt,
+        recordedTimeZoneIdentifier,
         status: "pending",
         visibility: "private",
         createdAt: now,
@@ -156,6 +160,7 @@ app.post(
       loudnessLufs: body.loudnessLufs ?? null,
       truePeakDb: body.truePeakDb ?? null,
       recordedAt,
+      recordedTimeZoneIdentifier,
       createdAt: now,
     });
 
@@ -241,6 +246,7 @@ app.post(
           loudnessLufs: session.loudnessLufs,
           truePeakDb: session.truePeakDb,
           recordedAt: session.recordedAt,
+          recordedTimeZoneIdentifier: session.recordedTimeZoneIdentifier,
           audioKey: session.audioKey,
           imageKey: session.imageKey,
           fileSizeBytes: audioHead.size,
@@ -545,6 +551,9 @@ app.patch(
       set.recordedAt = body.recordedAt
         ? new Date(body.recordedAt * 1000)
         : null;
+    }
+    if (body.recordedTimeZoneIdentifier !== undefined) {
+      set.recordedTimeZoneIdentifier = body.recordedTimeZoneIdentifier;
     }
     if (body.latitude !== undefined && body.longitude !== undefined) {
       set.latitude = body.latitude;
