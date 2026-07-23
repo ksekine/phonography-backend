@@ -32,6 +32,10 @@ jobs:
           secrets: |
             R2_ACCESS_KEY_ID
             R2_SECRET_ACCESS_KEY
+            FCM_SERVICE_ACCOUNT_EMAIL
+            FCM_SERVICE_ACCOUNT_PRIVATE_KEY
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FCM_SERVICE_ACCOUNT_EMAIL: ${{ secrets.FCM_SERVICE_ACCOUNT_EMAIL }}
+          FCM_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.FCM_SERVICE_ACCOUNT_PRIVATE_KEY }}

@@ -3,6 +3,9 @@
 export type AppBindings = CloudflareBindings & {
   DB: D1Database;
   BUCKET: R2Bucket;
+  FIREBASE_PROJECT_ID: string;
+  FCM_SERVICE_ACCOUNT_EMAIL: string;
+  FCM_SERVICE_ACCOUNT_PRIVATE_KEY: string;
 };
 
 export type AppEnv = {

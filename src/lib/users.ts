@@ -1,6 +1,14 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { likes, recordingUploadSessions, recordings, reports, users } from "../db/schema";
+import {
+  likeNotificationReceipts,
+  likes,
+  pushDevices,
+  recordingUploadSessions,
+  recordings,
+  reports,
+  users,
+} from "../db/schema";
 import type { AppBindings } from "../types";
 
 /**
@@ -63,6 +71,10 @@ export async function deleteUserData(
     .from(recordings)
     .where(eq(recordings.userId, userId));
   await db.batch([
+    db.delete(pushDevices).where(eq(pushDevices.userId, userId)),
+    db.delete(likeNotificationReceipts).where(eq(likeNotificationReceipts.actorUserId, userId)),
+    db.delete(likeNotificationReceipts).where(eq(likeNotificationReceipts.recipientUserId, userId)),
+    db.delete(likeNotificationReceipts).where(inArray(likeNotificationReceipts.recordingId, ownRecordingIds)),
     db.delete(likes).where(eq(likes.userId, userId)),
     db.delete(likes).where(inArray(likes.recordingId, ownRecordingIds)),
     db.delete(reports).where(eq(reports.reporterUserId, userId)),

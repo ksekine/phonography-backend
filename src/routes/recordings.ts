@@ -3,7 +3,13 @@ import { and, asc, desc, eq, gte, isNotNull, lt, lte, ne, or, sql } from "drizzl
 import { drizzle } from "drizzle-orm/d1";
 import { Hono, type Context } from "hono";
 import { optionalAuth, requireAuth } from "../middleware/auth";
-import { likes, recordingUploadSessions, recordings, reports } from "../db/schema";
+import {
+  likeNotificationReceipts,
+  likes,
+  recordingUploadSessions,
+  recordings,
+  reports,
+} from "../db/schema";
 import { toMapRecording, toPublicRecording } from "../lib/dto";
 import { encodeGeohash } from "../lib/geohash";
 import { presignPutUrl } from "../lib/r2presign";
@@ -24,6 +30,7 @@ import {
   type RecordingRow,
 } from "../lib/recordings";
 import { computeScore } from "../lib/score";
+import { sendLikeNotification } from "../lib/fcm";
 import type { AppEnv } from "../types";
 import {
   createRecordingSchema,
@@ -701,19 +708,53 @@ app.post("/recordings/:id/like", requireAuth, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  // いいね本体と like_count の再集計を同一 batch で行い整合を保つ
-  await db.batch([
-    db
-      .insert(likes)
-      .values({ userId, recordingId: row.id, createdAt: new Date() })
-      .onConflictDoNothing(),
-    db
-      .update(recordings)
-      .set({
-        likeCount: sql`(SELECT COUNT(*) FROM likes WHERE recording_id = ${row.id})`,
-      })
-      .where(eq(recordings.id, row.id)),
-  ]);
+  const likeInsert = db
+    .insert(likes)
+    .values({ userId, recordingId: row.id, createdAt: new Date() })
+    .onConflictDoNothing()
+    .returning({ recordingId: likes.recordingId });
+  const receiptInsert = userId === row.userId
+    ? null
+    : db
+        .insert(likeNotificationReceipts)
+        .values({
+          actorUserId: userId,
+          recipientUserId: row.userId,
+          recordingId: row.id,
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning({ recordingId: likeNotificationReceipts.recordingId });
+
+  const updateLikeCount = db
+    .update(recordings)
+    .set({
+      likeCount: sql`(SELECT COUNT(*) FROM likes WHERE recording_id = ${row.id})`,
+    })
+    .where(eq(recordings.id, row.id));
+
+  // いいね、通知Receipt、like_countを同一batchで確定する。
+  let insertedLike: boolean;
+  let insertedReceipt = false;
+  if (receiptInsert) {
+    const [likeRows, receiptRows] = await db.batch([
+      likeInsert,
+      receiptInsert,
+      updateLikeCount,
+    ]);
+    insertedLike = likeRows.length > 0;
+    insertedReceipt = receiptRows.length > 0;
+  } else {
+    const [likeRows] = await db.batch([likeInsert, updateLikeCount]);
+    insertedLike = likeRows.length > 0;
+  }
+  if (insertedLike && insertedReceipt) {
+    c.executionCtx.waitUntil(sendLikeNotification(c.env, {
+      recipientUserId: row.userId,
+      recordingId: row.id,
+      recordingTitle: row.title,
+    }));
+  }
   await refreshScore(db, row.id);
 
   const updated = await loadRecording(db, row.id);

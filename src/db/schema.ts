@@ -156,6 +156,50 @@ export const likes = sqliteTable(
 );
 
 /**
+ * いいね通知の送信資格を消費した履歴。いいね解除時にも残し、同じユーザーが
+ * 同じ録音を再度いいねしても通知を再送しない。recipient は通知配信・退会時の
+ * 検索用に保持し、公開 API には出さない。
+ */
+export const likeNotificationReceipts = sqliteTable(
+  "like_notification_receipts",
+  {
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id),
+    recipientUserId: text("recipient_user_id")
+      .notNull()
+      .references(() => users.id),
+    recordingId: text("recording_id")
+      .notNull()
+      .references(() => recordings.id),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.actorUserId, t.recordingId] }),
+    index("like_notification_receipts_recipient_idx").on(t.recipientUserId),
+    index("like_notification_receipts_recording_idx").on(t.recordingId),
+  ]
+);
+
+/** FCM registration token. One installation is owned by exactly one user. */
+export const pushDevices = sqliteTable(
+  "push_devices",
+  {
+    installationId: text("installation_id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    fcmToken: text("fcm_token").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("push_devices_fcm_token_uq").on(t.fcmToken),
+    index("push_devices_user_idx").on(t.userId),
+  ]
+);
+
+/**
  * 通報。作成時に recordings.report_count を同一 batch でインクリメントし、
  * 閾値(例: 3)を超えたら recordings.status を 'hidden' にするのはアプリロジック側の責務。
  */
