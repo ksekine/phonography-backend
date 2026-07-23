@@ -505,7 +505,7 @@ app.get("/recordings/:id/me", requireAuth, async (c) => {
     isLikedBy(db, userId, row.id),
     isReportedBy(db, userId, row.id),
   ]);
-  const res = c.json({ likedByMe, reportedByMe });
+  const res = c.json({ likedByMe, reportedByMe, likeCount: row.likeCount });
   res.headers.set("cache-control", "private, no-store");
   return res;
 });
@@ -756,6 +756,7 @@ app.post("/recordings/:id/like", requireAuth, async (c) => {
     }));
   }
   await refreshScore(db, row.id);
+  invalidatePublicDetailCache(c, row.id);
 
   const updated = await loadRecording(db, row.id);
   return c.json({
@@ -784,6 +785,7 @@ app.delete("/recordings/:id/like", requireAuth, async (c) => {
       .where(eq(recordings.id, row.id)),
   ]);
   await refreshScore(db, row.id);
+  invalidatePublicDetailCache(c, row.id);
 
   const updated = await loadRecording(db, row.id);
   return c.json({
