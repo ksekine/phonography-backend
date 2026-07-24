@@ -21,13 +21,21 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env prod --minify
+          # secrets の同期先も Wrangler の prod 環境に合わせる
+          environment: prod
           packageManager: bun
+          # デプロイ前に D1 マイグレーションを適用
+          preCommands: bunx wrangler d1 migrations apply DB --env prod --remote
           # Worker シークレット同期:
           # GitHub Environment (prod) の Secrets を env で渡し、secrets に名前を列挙すると
           # デプロイ時に wrangler secret put 相当が実行される。
           secrets: |
             R2_ACCESS_KEY_ID
             R2_SECRET_ACCESS_KEY
+            FCM_SERVICE_ACCOUNT_EMAIL
+            FCM_SERVICE_ACCOUNT_PRIVATE_KEY
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FCM_SERVICE_ACCOUNT_EMAIL: ${{ secrets.FCM_SERVICE_ACCOUNT_EMAIL }}
+          FCM_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.FCM_SERVICE_ACCOUNT_PRIVATE_KEY }}

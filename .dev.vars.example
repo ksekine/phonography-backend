@@ -8,3 +8,10 @@
 # 対象バケットに Object Read & Write をスコープしたトークンを発行して取得する。
 R2_ACCESS_KEY_ID=your-r2-access-key-id
 R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+
+# FCM HTTP v1用サービスアカウント。秘密鍵は改行を\\nにした1行でもよい。
+FCM_SERVICE_ACCOUNT_EMAIL=firebase-adminsdk@example.iam.gserviceaccount.com
+FCM_SERVICE_ACCOUNT_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n
+
+# 認証は Firebase Authentication。ID トークンは Google の公開 JWKS で検証するため
+# サーバー側のシークレットは不要(プロジェクト ID は wrangler.jsonc の vars で管理)。
