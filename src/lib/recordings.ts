@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { likes, recordings, reports } from "../db/schema";
 import { computeScore } from "./score";
@@ -38,6 +38,21 @@ export function canView(row: RecordingRow, userId: string): boolean {
   if (row.status === "deleted") return false;
   if (row.userId === userId) return true;
   return row.status === "ready" && row.visibility === "public";
+}
+
+/**
+ * canView() の SQL 版。JOIN 先の recordings を可視な行だけに絞る用途。
+ * canView() と同じ真理値表を返さなければならない — 片方だけ変更しないこと
+ * (真理値表は src/lib/recordings.test.ts で固定してある)。
+ */
+export function visibleToSql(userId: string) {
+  return and(
+    ne(recordings.status, "deleted"),
+    or(
+      eq(recordings.userId, userId),
+      and(eq(recordings.status, "ready"), eq(recordings.visibility, "public"))
+    )
+  );
 }
 
 /** カウンタ変更後にスコアを再計算して保存する */

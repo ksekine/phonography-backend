@@ -152,6 +152,10 @@ export const likes = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.recordingId] }),
     index("likes_recording_idx").on(t.recordingId),
+    // 本人のいいね一覧のキーセットページング用。
+    // WHERE user_id = ? ORDER BY created_at DESC, recording_id DESC を
+    // 完全にカバーする(SQLite は ASC インデックスを逆順に走査できる)。
+    index("likes_user_created_idx").on(t.userId, t.createdAt, t.recordingId),
   ]
 );
 

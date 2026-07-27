@@ -1,0 +1,1 @@
+CREATE INDEX `likes_user_created_idx` ON `likes` (`user_id`,`created_at`,`recording_id`);
