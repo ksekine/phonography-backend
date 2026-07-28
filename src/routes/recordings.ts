@@ -25,7 +25,10 @@ import {
   canView,
   isLikedBy,
   isReportedBy,
+  formatKeysetCursor,
+  keysetAfter,
   loadRecording,
+  parseKeysetCursor,
   refreshScore,
   visibleToSql,
   type RecordingRow,
@@ -35,9 +38,8 @@ import { sendLikeNotification } from "../lib/fcm";
 import type { AppEnv } from "../types";
 import {
   createRecordingSchema,
-  likedListQuerySchema,
+  keysetListQuerySchema,
   mapQuerySchema,
-  myListQuerySchema,
   reportSchema,
   searchQuerySchema,
   updateRecordingSchema,
@@ -464,29 +466,33 @@ app.get(
 app.get(
   "/me/recordings",
   requireAuth,
-  zValidator("query", myListQuerySchema),
+  zValidator("query", keysetListQuerySchema),
   async (c) => {
     const q = c.req.valid("query");
     const db = drizzle(c.env.DB);
     const conditions = [
       eq(recordings.userId, c.get("userId")),
       ne(recordings.status, "deleted"),
+      q.cursor
+        ? keysetAfter(
+            recordings.createdAt,
+            recordings.id,
+            parseKeysetCursor(q.cursor)
+          )
+        : undefined,
     ];
-    if (q.cursor) {
-      conditions.push(lt(recordings.createdAt, new Date(q.cursor * 1000)));
-    }
     const rows = await db
       .select()
       .from(recordings)
       .where(and(...conditions))
-      .orderBy(desc(recordings.createdAt))
+      .orderBy(desc(recordings.createdAt), desc(recordings.id))
       .limit(q.limit);
     const last = rows.at(-1);
     return c.json({
       items: rows.map((r) => toPublicRecording(r, { isMine: true })),
       nextCursor:
         rows.length === q.limit && last
-          ? Math.floor(last.createdAt.getTime() / 1000)
+          ? formatKeysetCursor(last.createdAt, last.id)
           : null,
     });
   }
@@ -502,22 +508,19 @@ app.get(
 app.get(
   "/me/likes",
   requireAuth,
-  zValidator("query", likedListQuerySchema),
+  zValidator("query", keysetListQuerySchema),
   async (c) => {
     const q = c.req.valid("query");
     const userId = c.get("userId");
     const db = drizzle(c.env.DB);
 
-    let cursorCondition;
-    if (q.cursor) {
-      const separator = q.cursor.indexOf("_");
-      const likedAt = new Date(Number(q.cursor.slice(0, separator)) * 1000);
-      const recordingId = q.cursor.slice(separator + 1);
-      cursorCondition = or(
-        lt(likes.createdAt, likedAt),
-        and(eq(likes.createdAt, likedAt), lt(likes.recordingId, recordingId))
-      );
-    }
+    const cursorCondition = q.cursor
+      ? keysetAfter(
+          likes.createdAt,
+          likes.recordingId,
+          parseKeysetCursor(q.cursor)
+        )
+      : undefined;
 
     const rows = await db
       .select({ recording: recordings, likedAt: likes.createdAt })
@@ -539,7 +542,7 @@ app.get(
       })),
       nextCursor:
         rows.length === q.limit && last
-          ? `${Math.floor(last.likedAt.getTime() / 1000)}_${last.recording.id}`
+          ? formatKeysetCursor(last.likedAt, last.recording.id)
           : null,
     });
     res.headers.set("cache-control", "private, no-store");

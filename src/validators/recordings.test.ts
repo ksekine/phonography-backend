@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createRecordingSchema,
-  likedListQuerySchema,
+  keysetListQuerySchema,
   updateRecordingSchema,
 } from "./recordings";
 
@@ -64,20 +64,20 @@ describe("updateRecordingSchema", () => {
   });
 });
 
-describe("likedListQuerySchema", () => {
+describe("keysetListQuerySchema", () => {
   test("defaults the limit when it is absent", () => {
-    expect(likedListQuerySchema.parse({}).limit).toBe(50);
+    expect(keysetListQuerySchema.parse({}).limit).toBe(50);
   });
 
   test("clamps the limit to the allowed range", () => {
-    expect(likedListQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
-    expect(likedListQuerySchema.safeParse({ limit: "101" }).success).toBe(false);
-    expect(likedListQuerySchema.parse({ limit: "100" }).limit).toBe(100);
+    expect(keysetListQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
+    expect(keysetListQuerySchema.safeParse({ limit: "101" }).success).toBe(false);
+    expect(keysetListQuerySchema.parse({ limit: "100" }).limit).toBe(100);
   });
 
   test("accepts a composite cursor", () => {
     expect(
-      likedListQuerySchema.safeParse({
+      keysetListQuerySchema.safeParse({
         cursor: "1784730806_4b55ae5d-4f7f-4fc1-a09d-4ca7e3f2f6bd",
       }).success
     ).toBe(true);
@@ -85,17 +85,17 @@ describe("likedListQuerySchema", () => {
 
   test("rejects a bare timestamp cursor", () => {
     // /me/recordings 形式のカーソルを取り違えて渡した場合。
-    expect(likedListQuerySchema.safeParse({ cursor: "1784730806" }).success).toBe(
+    expect(keysetListQuerySchema.safeParse({ cursor: "1784730806" }).success).toBe(
       false
     );
   });
 
   test("rejects a cursor whose recording id is malformed", () => {
     expect(
-      likedListQuerySchema.safeParse({ cursor: "1784730806_not-a-uuid" }).success
+      keysetListQuerySchema.safeParse({ cursor: "1784730806_not-a-uuid" }).success
     ).toBe(false);
     expect(
-      likedListQuerySchema.safeParse({
+      keysetListQuerySchema.safeParse({
         cursor: "_4b55ae5d-4f7f-4fc1-a09d-4ca7e3f2f6bd",
       }).success
     ).toBe(false);
