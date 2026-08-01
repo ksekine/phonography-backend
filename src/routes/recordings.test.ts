@@ -9,3 +9,12 @@ describe("recording viewer state", () => {
     expect(await response.json()).toEqual({ error: "unauthorized" });
   });
 });
+
+describe("liked recordings list", () => {
+  test("requires authentication", async () => {
+    const response = await app.request("/api/me/likes");
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthorized" });
+  });
+});

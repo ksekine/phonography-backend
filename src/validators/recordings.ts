@@ -84,7 +84,18 @@ export const searchQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).max(1000).default(0),
 });
 
-export const myListQuerySchema = z.object({
+/**
+ * キーセットページングを行う一覧の共通クエリ。
+ *
+ * カーソルが unix 秒単独ではなく "<秒>_<recording_id>" の複合キーなのは、
+ * created_at が秒精度でタイが起きるため。lt(created_at, cursor) だけでは
+ * ページ境界にまたがった同一秒の行が丸ごと欠落する。recording_id を第二キーに
+ * 足して全順序にしている。
+ */
+export const keysetListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.coerce.number().int().positive().optional(), // 前ページ末尾の createdAt (unix 秒)
+  cursor: z
+    .string()
+    .regex(/^\d+_[0-9a-f-]{36}$/)
+    .optional(),
 });

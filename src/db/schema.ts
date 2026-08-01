@@ -99,8 +99,10 @@ export const recordings = sqliteTable(
       .on(t.score)
       .where(sql`status = 'ready' AND visibility = 'public'`),
     index("recordings_geohash_idx").on(t.geohash),
-    // 自分の録音一覧(private も含めて返す)
-    index("recordings_user_created_idx").on(t.userId, t.createdAt),
+    // 自分の録音一覧(private も含めて返す)。
+    // id まで含めるのは ORDER BY (created_at DESC, id DESC) をカバーするため。
+    // 複合カーソルの第二キーが外れると一時 B-tree ソートが発生する。
+    index("recordings_user_created_idx").on(t.userId, t.createdAt, t.id),
   ]
 );
 
@@ -152,6 +154,10 @@ export const likes = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.recordingId] }),
     index("likes_recording_idx").on(t.recordingId),
+    // 本人のいいね一覧のキーセットページング用。
+    // WHERE user_id = ? ORDER BY created_at DESC, recording_id DESC を
+    // 完全にカバーする(SQLite は ASC インデックスを逆順に走査できる)。
+    index("likes_user_created_idx").on(t.userId, t.createdAt, t.recordingId),
   ]
 );
 

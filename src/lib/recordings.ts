@@ -1,5 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { likes, recordings, reports } from "../db/schema";
 import { computeScore } from "./score";
 
@@ -38,6 +39,56 @@ export function canView(row: RecordingRow, userId: string): boolean {
   if (row.status === "deleted") return false;
   if (row.userId === userId) return true;
   return row.status === "ready" && row.visibility === "public";
+}
+
+/**
+ * キーセットページングのカーソル "<unix秒>_<id>"。
+ *
+ * created_at 単独では足りない。timestamp は秒精度なので同一秒の行が普通にでき、
+ * lt(created_at, cursor) だけだとページ境界にまたがったタイが丸ごと欠落する。
+ * id を第二キーに足して全順序にしている。
+ */
+export function formatKeysetCursor(at: Date, id: string): string {
+  return `${Math.floor(at.getTime() / 1000)}_${id}`;
+}
+
+/** 形式は zod 側(keysetListQuerySchema)で保証済み。 */
+export function parseKeysetCursor(cursor: string): { at: Date; id: string } {
+  const separator = cursor.indexOf("_");
+  return {
+    at: new Date(Number(cursor.slice(0, separator)) * 1000),
+    id: cursor.slice(separator + 1),
+  };
+}
+
+/**
+ * "このカーソルより後" を表す条件。
+ * ORDER BY は (createdAt DESC, id DESC) であることが前提。
+ */
+export function keysetAfter(
+  createdAt: SQLiteColumn,
+  id: SQLiteColumn,
+  cursor: { at: Date; id: string }
+) {
+  return or(
+    lt(createdAt, cursor.at),
+    and(eq(createdAt, cursor.at), lt(id, cursor.id))
+  );
+}
+
+/**
+ * canView() の SQL 版。JOIN 先の recordings を可視な行だけに絞る用途。
+ * canView() と同じ真理値表を返さなければならない — 片方だけ変更しないこと
+ * (真理値表は src/lib/recordings.test.ts で固定してある)。
+ */
+export function visibleToSql(userId: string) {
+  return and(
+    ne(recordings.status, "deleted"),
+    or(
+      eq(recordings.userId, userId),
+      and(eq(recordings.status, "ready"), eq(recordings.visibility, "public"))
+    )
+  );
 }
 
 /** カウンタ変更後にスコアを再計算して保存する */

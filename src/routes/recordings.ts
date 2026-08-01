@@ -25,8 +25,12 @@ import {
   canView,
   isLikedBy,
   isReportedBy,
+  formatKeysetCursor,
+  keysetAfter,
   loadRecording,
+  parseKeysetCursor,
   refreshScore,
+  visibleToSql,
   type RecordingRow,
 } from "../lib/recordings";
 import { computeScore } from "../lib/score";
@@ -34,8 +38,8 @@ import { sendLikeNotification } from "../lib/fcm";
 import type { AppEnv } from "../types";
 import {
   createRecordingSchema,
+  keysetListQuerySchema,
   mapQuerySchema,
-  myListQuerySchema,
   reportSchema,
   searchQuerySchema,
   updateRecordingSchema,
@@ -462,31 +466,87 @@ app.get(
 app.get(
   "/me/recordings",
   requireAuth,
-  zValidator("query", myListQuerySchema),
+  zValidator("query", keysetListQuerySchema),
   async (c) => {
     const q = c.req.valid("query");
     const db = drizzle(c.env.DB);
     const conditions = [
       eq(recordings.userId, c.get("userId")),
       ne(recordings.status, "deleted"),
+      q.cursor
+        ? keysetAfter(
+            recordings.createdAt,
+            recordings.id,
+            parseKeysetCursor(q.cursor)
+          )
+        : undefined,
     ];
-    if (q.cursor) {
-      conditions.push(lt(recordings.createdAt, new Date(q.cursor * 1000)));
-    }
     const rows = await db
       .select()
       .from(recordings)
       .where(and(...conditions))
-      .orderBy(desc(recordings.createdAt))
+      .orderBy(desc(recordings.createdAt), desc(recordings.id))
       .limit(q.limit);
     const last = rows.at(-1);
     return c.json({
       items: rows.map((r) => toPublicRecording(r, { isMine: true })),
       nextCursor:
         rows.length === q.limit && last
-          ? Math.floor(last.createdAt.getTime() / 1000)
+          ? formatKeysetCursor(last.createdAt, last.id)
           : null,
     });
+  }
+);
+
+/**
+ * 本人がいいねした録音の一覧。
+ * 非公開化・非表示化・削除された録音は SQL 側で落とす。tombstone を返すと
+ * 「その録音が存在してモデレーションされた」ことが漏れ、匿名公開の方針に反する。
+ * JS 側でのフィルタにしないのは rows.length === limit を次ページ判定に
+ * 使い続けるため(/me/recordings と同じ)。
+ */
+app.get(
+  "/me/likes",
+  requireAuth,
+  zValidator("query", keysetListQuerySchema),
+  async (c) => {
+    const q = c.req.valid("query");
+    const userId = c.get("userId");
+    const db = drizzle(c.env.DB);
+
+    const cursorCondition = q.cursor
+      ? keysetAfter(
+          likes.createdAt,
+          likes.recordingId,
+          parseKeysetCursor(q.cursor)
+        )
+      : undefined;
+
+    const rows = await db
+      .select({ recording: recordings, likedAt: likes.createdAt })
+      .from(likes)
+      .innerJoin(recordings, eq(recordings.id, likes.recordingId))
+      .where(
+        and(eq(likes.userId, userId), visibleToSql(userId), cursorCondition)
+      )
+      .orderBy(desc(likes.createdAt), desc(likes.recordingId))
+      .limit(q.limit);
+
+    const last = rows.at(-1);
+    const res = c.json({
+      items: rows.map(({ recording, likedAt }) => ({
+        ...toPublicRecording(recording, {
+          isMine: recording.userId === userId,
+        }),
+        likedAt: Math.floor(likedAt.getTime() / 1000),
+      })),
+      nextCursor:
+        rows.length === q.limit && last
+          ? formatKeysetCursor(last.likedAt, last.recording.id)
+          : null,
+    });
+    res.headers.set("cache-control", "private, no-store");
+    return res;
   }
 );
 
