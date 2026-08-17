@@ -88,7 +88,7 @@ export const searchQuerySchema = z.object({
  * 新着一覧の既定件数。iOS の横スクロール行の見え幅に合わせたもの。
  * アプリが実際に投げてくる唯一の値なので、キャッシュのパージ対象にも使う。
  */
-export const LATEST_DEFAULT_LIMIT = 10;
+export const LATEST_DEFAULT_LIMIT = 15;
 
 /**
  * 新着一覧。上限を絞ってあるのは、応答が全ユーザー共有でキャッシュされる

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  LATEST_DEFAULT_LIMIT,
   createRecordingSchema,
   keysetListQuerySchema,
   latestQuerySchema,
@@ -67,7 +68,9 @@ describe("updateRecordingSchema", () => {
 
 describe("latestQuerySchema", () => {
   test("defaults the limit to the thumbnail row size", () => {
-    expect(latestQuerySchema.parse({}).limit).toBe(10);
+    // キャッシュのパージ対象キーもこの値なので、iOS 側の要求件数と揃っていること。
+    expect(latestQuerySchema.parse({}).limit).toBe(LATEST_DEFAULT_LIMIT);
+    expect(LATEST_DEFAULT_LIMIT).toBe(15);
   });
 
   test("coerces the limit from a query string value", () => {
