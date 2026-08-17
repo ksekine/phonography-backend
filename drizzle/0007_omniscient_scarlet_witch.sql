@@ -1,0 +1,1 @@
+CREATE INDEX `recordings_public_created_idx` ON `recordings` (`created_at`,`id`) WHERE status = 'ready' AND visibility = 'public' AND latitude IS NOT NULL AND longitude IS NOT NULL;

@@ -98,6 +98,14 @@ export const recordings = sqliteTable(
     index("recordings_public_score_idx")
       .on(t.score)
       .where(sql`status = 'ready' AND visibility = 'public'`),
+    // 新着一覧(/recordings/latest)専用。ORDER BY (created_at DESC, id DESC) を
+    // カバーするため id まで含める。座標の NOT NULL も述語に入れてあるので、
+    // 索引のエントリはすべて一覧の対象 = LIMIT 10 が索引を 10 件読むだけで済む。
+    index("recordings_public_created_idx")
+      .on(t.createdAt, t.id)
+      .where(
+        sql`status = 'ready' AND visibility = 'public' AND latitude IS NOT NULL AND longitude IS NOT NULL`
+      ),
     index("recordings_geohash_idx").on(t.geohash),
     // 自分の録音一覧(private も含めて返す)。
     // id まで含めるのは ORDER BY (created_at DESC, id DESC) をカバーするため。

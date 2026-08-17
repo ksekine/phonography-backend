@@ -50,6 +50,13 @@
       "when": 1785251504626,
       "tag": "0006_common_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786950089961,
+      "tag": "0007_omniscient_scarlet_witch",
+      "breakpoints": true
     }
   ]
 }

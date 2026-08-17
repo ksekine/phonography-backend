@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createRecordingSchema,
   keysetListQuerySchema,
+  latestQuerySchema,
   updateRecordingSchema,
 } from "./recordings";
 
@@ -61,6 +62,26 @@ describe("updateRecordingSchema", () => {
 
     expect("recordedTimeZoneIdentifier" in omitted).toBe(false);
     expect(cleared.recordedTimeZoneIdentifier).toBeNull();
+  });
+});
+
+describe("latestQuerySchema", () => {
+  test("defaults the limit to the thumbnail row size", () => {
+    expect(latestQuerySchema.parse({}).limit).toBe(10);
+  });
+
+  test("coerces the limit from a query string value", () => {
+    expect(latestQuerySchema.parse({ limit: "20" }).limit).toBe(20);
+  });
+
+  test("clamps the limit to the allowed range", () => {
+    expect(latestQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
+    expect(latestQuerySchema.safeParse({ limit: "51" }).success).toBe(false);
+    expect(latestQuerySchema.parse({ limit: "50" }).limit).toBe(50);
+  });
+
+  test("rejects a fractional limit", () => {
+    expect(latestQuerySchema.safeParse({ limit: "10.5" }).success).toBe(false);
   });
 });
 

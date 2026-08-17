@@ -9,6 +9,16 @@ export const MAX_AUDIO_BYTES = 1024 * 1024 * 1024; // 1 GiB (48kHz/24bit mono �
 export const MAP_CELL_PRECISION = 3;
 export const MAP_CACHE_TTL_SECONDS = 300;
 export const DETAIL_CACHE_TTL_SECONDS = 60;
+// 新着一覧。全ユーザーに同一の応答を返すので無条件にキャッシュできる。
+// 公開直後の録音が最大 60 秒出てこないが、地図上部の装飾行なので許容する。
+export const LATEST_CACHE_TTL_SECONDS = 60;
+// 画像の共有キャッシュ(エッジ)の保持時間。公開録音のものだけ載せ、
+// 差し替え・非公開化・削除時は明示的に落とす。
+export const IMAGE_CACHE_TTL_SECONDS = 86400;
+// 端末側キャッシュの保持時間。エッジと違ってパージできないので短くし、
+// 画像を差し替えたときに他ユーザーへ最大 1 時間で反映されるようにする。
+// (期限切れ後は ETag による条件付きリクエストになるので大半は 304 で済む)
+export const IMAGE_CLIENT_CACHE_TTL_SECONDS = 3600;
 export const REPORT_HIDE_THRESHOLD = 3;
 export const UPLOAD_URL_EXPIRES_SECONDS = 3600;
 export const MIME: Record<"wav" | "m4a", string> = {
