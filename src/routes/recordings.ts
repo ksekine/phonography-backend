@@ -15,6 +15,9 @@ import { encodeGeohash } from "../lib/geohash";
 import { presignPutUrl } from "../lib/r2presign";
 import {
   DETAIL_CACHE_TTL_SECONDS,
+  IMAGE_CACHE_TTL_SECONDS,
+  IMAGE_CLIENT_CACHE_TTL_SECONDS,
+  LATEST_CACHE_TTL_SECONDS,
   MAP_CACHE_TTL_SECONDS,
   MAP_CELL_PRECISION,
   MAX_AUDIO_BYTES,
@@ -37,8 +40,10 @@ import { computeScore } from "../lib/score";
 import { sendLikeNotification } from "../lib/fcm";
 import type { AppEnv } from "../types";
 import {
+  LATEST_DEFAULT_LIMIT,
   createRecordingSchema,
   keysetListQuerySchema,
+  latestQuerySchema,
   mapQuerySchema,
   reportSchema,
   searchQuerySchema,
@@ -47,12 +52,64 @@ import {
 
 const app = new Hono<AppEnv>();
 
-function publicDetailCacheKey(c: Context<AppEnv>, recordingId: string): Request {
+/**
+ * 公開レスポンスのキャッシュキー。呼び出し元のパスが
+ * /recordings/:id/like のような別のルートでも、対象の公開 URL
+ * (/recordings/<path>) に正規化する。
+ */
+function publicCacheKey(
+  c: Context<AppEnv>,
+  path: string,
+  search = ""
+): Request {
   const url = new URL(c.req.url);
   const recordingsPathIndex = url.pathname.indexOf("/recordings/");
-  url.pathname = `${url.pathname.slice(0, recordingsPathIndex)}/recordings/${recordingId}`;
-  url.search = "";
+  url.pathname = `${url.pathname.slice(0, recordingsPathIndex)}/recordings/${path}`;
+  url.search = search;
   return new Request(url);
+}
+
+function publicDetailCacheKey(c: Context<AppEnv>, recordingId: string): Request {
+  return publicCacheKey(c, recordingId);
+}
+
+function publicImageCacheKey(c: Context<AppEnv>, recordingId: string): Request {
+  return publicCacheKey(c, `${recordingId}/image`);
+}
+
+/**
+ * 新着一覧のキャッシュキー。検証済みの limit だけを載せて正規化する。
+ * c.req.url をそのまま使うと ?x=1 のような無視されるパラメータの数だけ
+ * 別エントリが増え、キャッシュを容易に汚染できてしまう。
+ */
+function latestCacheKey(c: Context<AppEnv>, limit: number): Request {
+  return publicCacheKey(c, "latest", `limit=${limit}`);
+}
+
+/**
+ * If-None-Match が現在の ETag と一致するなら本体なしの 304 を返す。
+ * 端末側キャッシュの期限切れ後の再検証を軽く済ませるための処理で、
+ * これが無いと画像を丸ごと再送してしまう。
+ * (Cache API の match は正規化した Request で引くため条件付きヘッダを見ない)
+ */
+function notModifiedResponse(
+  c: Context<AppEnv>,
+  headers: Headers
+): Response | null {
+  const etag = headers.get("etag");
+  const ifNoneMatch = c.req.header("if-none-match");
+  if (!etag || !ifNoneMatch) return null;
+
+  const normalize = (value: string) => value.trim().replace(/^W\//, "");
+  const matched =
+    ifNoneMatch.trim() === "*" ||
+    ifNoneMatch.split(",").map(normalize).includes(normalize(etag));
+  if (!matched) return null;
+
+  const responseHeaders = new Headers({ etag });
+  const cacheControl = headers.get("cache-control");
+  if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  return new Response(null, { status: 304, headers: responseHeaders });
 }
 
 function invalidatePublicDetailCache(
@@ -61,6 +118,33 @@ function invalidatePublicDetailCache(
 ): void {
   c.executionCtx.waitUntil(
     caches.default.delete(publicDetailCacheKey(c, recordingId))
+  );
+}
+
+/**
+ * 公開画像の共有キャッシュを落とす。非公開化・削除・通報による非表示など、
+ * 「もう誰でも見られる状態ではなくなった」遷移で必ず呼ぶこと。
+ * (detail 側と同じくベストエフォート: 実行したコロのキャッシュしか消えない)
+ */
+function invalidatePublicImageCache(
+  c: Context<AppEnv>,
+  recordingId: string
+): void {
+  c.executionCtx.waitUntil(
+    caches.default.delete(publicImageCacheKey(c, recordingId))
+  );
+}
+
+/**
+ * 新着一覧から消えるべき録音が出たときに共有キャッシュを落とす。
+ * limit ごとにエントリが分かれるため、アプリが実際に使う既定値だけを消す。
+ * それ以外の limit は TTL(60 秒)で自然に切れるのに任せる。
+ * 一覧に「載る」方向(公開直後)は TTL 任せでよく、ここは非表示化・削除など
+ * 「載ってはいけなくなった」方向のためだけに呼ぶ。
+ */
+function invalidateLatestCache(c: Context<AppEnv>): void {
+  c.executionCtx.waitUntil(
+    caches.default.delete(latestCacheKey(c, LATEST_DEFAULT_LIMIT))
   );
 }
 
@@ -278,6 +362,10 @@ app.post(
     }
     const updated = await loadRecording(db, id);
     invalidatePublicDetailCache(c, row.id);
+    // 差し替えアップロードでは image_key が新しい世代のキーに変わるが、
+    // 公開 URL (/recordings/:id/image) は変わらない。ここで落とさないと
+    // 共有キャッシュが古い画像を返し続ける。
+    invalidatePublicImageCache(c, row.id);
     return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
   }
 );
@@ -418,6 +506,65 @@ app.get(
       res.headers.set("x-cache", "MISS");
       c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
     }
+    return res;
+  }
+);
+
+// ---------------------------------------------------------------------------
+// latest (新着順。マップ上部の新着サムネイル行用)
+// 認証ミドルウェアを付けないのは意図的。全員に同一の応答を返すことで
+// Cache API のエントリを 1 本に保つ(= 本人の録音も除外しない)。
+// ※ /recordings/:id より先に定義してパスの衝突を避ける
+// ---------------------------------------------------------------------------
+
+app.get(
+  "/recordings/latest",
+  zValidator("query", latestQuerySchema),
+  async (c) => {
+    const q = c.req.valid("query");
+    const cache = caches.default;
+    const cacheKey = latestCacheKey(c, q.limit);
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const res = new Response(cached.body, cached);
+      res.headers.set("x-cache", "HIT");
+      return res;
+    }
+
+    const db = drizzle(c.env.DB);
+    const rows = await db
+      .select({
+        id: recordings.id,
+        title: recordings.title,
+        latitude: recordings.latitude,
+        longitude: recordings.longitude,
+        durationSeconds: recordings.durationSeconds,
+        imageKey: recordings.imageKey,
+        likeCount: recordings.likeCount,
+      })
+      .from(recordings)
+      // 座標必須。タップでマップを飛ばす行なので行き先のない録音は載せない
+      // (toMapRecording も座標 null で例外を投げる)。
+      .where(
+        and(
+          eq(recordings.status, "ready"),
+          eq(recordings.visibility, "public"),
+          isNotNull(recordings.latitude),
+          isNotNull(recordings.longitude)
+        )
+      )
+      // id を第二キーにするのは created_at が秒精度でタイが起きるため。
+      // 共有キャッシュに載る応答なので順序は決定的でなければならない。
+      .orderBy(desc(recordings.createdAt), desc(recordings.id))
+      .limit(q.limit);
+
+    const res = c.json({ items: rows.map(toMapRecording) });
+    res.headers.set(
+      "cache-control",
+      `public, max-age=${LATEST_CACHE_TTL_SECONDS}`
+    );
+    res.headers.set("x-cache", "MISS");
+    c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
     return res;
   }
 );
@@ -633,6 +780,9 @@ app.patch(
 
     const updated = await loadRecording(db, row.id);
     invalidatePublicDetailCache(c, row.id);
+    // visibility が public から private に変わり得るので画像と新着一覧も落とす。
+    invalidatePublicImageCache(c, row.id);
+    invalidateLatestCache(c);
     return c.json(toPublicRecording(updated as RecordingRow, { isMine: true }));
   }
 );
@@ -659,6 +809,8 @@ app.delete("/recordings/:id", requireAuth, async (c) => {
       .where(eq(recordingUploadSessions.recordingId, row.id));
   }
   invalidatePublicDetailCache(c, row.id);
+  invalidatePublicImageCache(c, row.id);
+  invalidateLatestCache(c);
   c.executionCtx.waitUntil(
     Promise.all([
       c.env.BUCKET.delete(row.audioKey),
@@ -677,6 +829,19 @@ app.delete("/recordings/:id", requireAuth, async (c) => {
 // ---------------------------------------------------------------------------
 
 app.get("/recordings/:id/image", optionalAuth, async (c) => {
+  // 共有キャッシュに載せるのは公開録音の画像だけなので、ヒットした時点で
+  // 誰に返しても安全。D1 と R2 を読む前に返す。
+  const cache = caches.default;
+  const cacheKey = publicImageCacheKey(c, c.req.param("id"));
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const notModified = notModifiedResponse(c, cached.headers);
+    if (notModified) return notModified;
+    const res = new Response(cached.body, cached);
+    res.headers.set("x-cache", "HIT");
+    return res;
+  }
+
   const db = drizzle(c.env.DB);
   const row = await loadRecording(db, c.req.param("id"));
   if (!row || !canView(row, c.get("userId")) || !row.imageKey) {
@@ -686,14 +851,31 @@ app.get("/recordings/:id/image", optionalAuth, async (c) => {
   if (!object) {
     return c.json({ error: "not_found" }, 404);
   }
-  return new Response(object.body, {
+
+  // 公開録音の画像は誰に対しても同一なので共有キャッシュに載せる
+  // (マップ上部の新着行が一度に 10 枚取りに来るため、ここが効くかどうかで
+  //  R2 への GET 数がまるごと変わる)。
+  // 非公開・本人だけが見られるものは絶対に共有キャッシュへ入れないこと。
+  const isPubliclyViewable = row.status === "ready" && row.visibility === "public";
+  const res = new Response(object.body, {
     headers: {
       "content-type": "image/jpeg",
       "content-length": String(object.size),
       etag: object.httpEtag,
-      "cache-control": "private, max-age=86400",
+      // 公開画像は s-maxage でエッジだけ長く持たせ、端末側は短くする。
+      // エッジは差し替え時にパージできるが端末のキャッシュはできないため。
+      "cache-control": isPubliclyViewable
+        ? `public, max-age=${IMAGE_CLIENT_CACHE_TTL_SECONDS}, s-maxage=${IMAGE_CACHE_TTL_SECONDS}`
+        : `private, max-age=${IMAGE_CACHE_TTL_SECONDS}`,
     },
   });
+  const notModified = notModifiedResponse(c, res.headers);
+  if (isPubliclyViewable) {
+    res.headers.set("x-cache", "MISS");
+    // 304 を返す場合は res の本体を誰も読まないので、clone せずそのまま渡す。
+    c.executionCtx.waitUntil(cache.put(cacheKey, notModified ? res : res.clone()));
+  }
+  return notModified ?? res;
 });
 
 /**
@@ -895,6 +1077,10 @@ app.post(
         })
         .where(eq(recordings.id, row.id));
       invalidatePublicDetailCache(c, row.id);
+      // 通報が閾値を超えると status が hidden になり得るので、
+      // 画像と新着一覧も落として非表示を即座に反映する。
+      invalidatePublicImageCache(c, row.id);
+      invalidateLatestCache(c);
     }
 
     return c.json({ reported: true }, inserted.length > 0 ? 201 : 200);

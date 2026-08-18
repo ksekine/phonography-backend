@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  LATEST_DEFAULT_LIMIT,
   createRecordingSchema,
   keysetListQuerySchema,
+  latestQuerySchema,
   updateRecordingSchema,
 } from "./recordings";
 
@@ -61,6 +63,28 @@ describe("updateRecordingSchema", () => {
 
     expect("recordedTimeZoneIdentifier" in omitted).toBe(false);
     expect(cleared.recordedTimeZoneIdentifier).toBeNull();
+  });
+});
+
+describe("latestQuerySchema", () => {
+  test("defaults the limit to the thumbnail row size", () => {
+    // キャッシュのパージ対象キーもこの値なので、iOS 側の要求件数と揃っていること。
+    expect(latestQuerySchema.parse({}).limit).toBe(LATEST_DEFAULT_LIMIT);
+    expect(LATEST_DEFAULT_LIMIT).toBe(15);
+  });
+
+  test("coerces the limit from a query string value", () => {
+    expect(latestQuerySchema.parse({ limit: "20" }).limit).toBe(20);
+  });
+
+  test("clamps the limit to the allowed range", () => {
+    expect(latestQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
+    expect(latestQuerySchema.safeParse({ limit: "51" }).success).toBe(false);
+    expect(latestQuerySchema.parse({ limit: "50" }).limit).toBe(50);
+  });
+
+  test("rejects a fractional limit", () => {
+    expect(latestQuerySchema.safeParse({ limit: "10.5" }).success).toBe(false);
   });
 });
 

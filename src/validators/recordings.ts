@@ -85,6 +85,25 @@ export const searchQuerySchema = z.object({
 });
 
 /**
+ * 新着一覧の既定件数。iOS の横スクロール行の見え幅に合わせたもの。
+ * アプリが実際に投げてくる唯一の値なので、キャッシュのパージ対象にも使う。
+ */
+export const LATEST_DEFAULT_LIMIT = 15;
+
+/**
+ * 新着一覧。上限を絞ってあるのは、応答が全ユーザー共有でキャッシュされる
+ * = limit の値ごとにキャッシュエントリが増えるため。
+ */
+export const latestQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(LATEST_DEFAULT_LIMIT),
+});
+
+/**
  * キーセットページングを行う一覧の共通クエリ。
  *
  * カーソルが unix 秒単独ではなく "<秒>_<recording_id>" の複合キーなのは、
